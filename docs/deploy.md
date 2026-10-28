@@ -87,11 +87,13 @@ docker compose run --rm setup && docker compose up -d
 
 新迁移遇到长期占锁会报出文件名和等待超时，先处理占锁事务，再重跑 setup，不要跳过迁移或改写迁移账本。并发索引创建中断可能留下无效索引：核实报错中的对象后，用 `DROP INDEX CONCURRENTLY <索引名>` 清理该失败索引再重跑；有效但定义不同的同名索引须先核对差异。这些保护不改变上述 Docker 更新顺序，跨旧版本升级仍可能执行历史上的破坏性迁移。
 
-#### 没有 Jina 时，三角洲信源也能出正文（2026 年 10 月 28 日）
+#### 三角洲信源不靠 Jina 取正文（2026 年 10 月 28 日）
 
-官网详情页是脚本渲染的，以前抓不到文字就会去调 Jina；没配 `JINA_API_KEY` 时这次调用直接报错，文章停在 `processing_state=new`、`body_status=pending`，公开页是空的。现在三件事一起做：Steam 订阅的 `description` 就是公告全文（`summaryIsBody`）；官网新闻和赛事从公开详情接口读取 `sContent`（`bodyUrlTemplate` / `bodyPath`）；仍然没有文字时（官网公告大多是一张长图）立刻记为正文未确认，按标题和摘要继续分析，不再重试一个永远不会成功的 Jina 调用。没有数据库迁移。
+官网详情页是脚本壳。配了 `JINA_API_KEY` 也读不出文字，文章会变成已分析但 `body_status=unconfirmed`，公开页只有摘要。没配密钥时，同一次调用直接报错，文章停在 pending。Steam 的公告全文在 RSS 的 `description` 里，不在网页上；再去抓网页或走 Jina，会在出口代理抖一下时变成 `TimeoutError`、`ProxyConnectionError` 或 `receipt … outcome unknown`。
 
-种子遇到已有 id 会跳过，所以已经导入的 4 个信源要自己改配置。先停下 worker，再对库执行下面的语句，然后启动新版本。采集每分钟看一次到期信源，会把仍在列表里的文章补上正文并重新分析。只有长图、补不上文字的，15 分钟后按仅摘要继续，避免和补正文抢一次分析。
+现在正文从信源自己的数据来：Steam 设 `summaryIsBody`；官网用公开详情接口的 `sContent`（`bodyUrlTemplate` / `bodyPath`）。详情里有文字就当正文，有没有 Jina 都一样。没有文字的（官网公告大多是一张长图）直接记为未确认，按标题和摘要继续，不再打开原文页，也不再调 Jina。没有密钥时，其他信源的正文回退同样改为未确认，不再把缺密钥当成可重试失败。没有数据库迁移。
+
+种子遇到已有 id 会跳过，库里的 4 个信源要自己改配置。先停 worker（避免它在改配置前再次去抓网页），确认出口代理是通的，执行下面的语句，再启动新版本。采集每分钟看一次到期信源。仍出现在列表里的旧文章会补上正文、重新公开并重新分析；已经是仅摘要的长图公告保持仅摘要。`failed` 的 Steam 稿不要改回 pending，下一轮采集会自己改掉。还停在 pending、正准备抓网页的，先推迟 15 分钟，让采集先写入正文。
 
 ```sql
 UPDATE sources
@@ -107,14 +109,24 @@ SET config = config || jsonb_build_object(
 WHERE id IN ('df-official-notices', 'df-official-news', 'df-official-esports');
 
 UPDATE articles
-SET processing_error = NULL, processing_attempts = 0,
-    processing_retry_at = now() + interval '15 minutes', processing_queued_at = NULL
+SET processing_retry_at = now() + interval '15 minutes', processing_queued_at = NULL
 WHERE source_id IN ('df-official-notices', 'df-official-news', 'df-official-esports', 'df-steam-news')
-  AND processing_state = 'new' AND body_status = 'pending'
-  AND processing_error LIKE 'extract: JINA_API_KEY%';
+  AND processing_state = 'new' AND body_status = 'pending';
 ```
 
-Docker 里对数据库执行：`docker compose exec -T db psql -U aihot -d aihot`，把上面的语句贴进去。库名或账号不同时，换成部署里的 `POSTGRES_USER` 和 `POSTGRES_DB`。
+Docker 里对数据库执行：`docker compose exec -T db psql -U aihot -d aihot`。库名或账号不同时，换成部署里的 `POSTGRES_USER` 和 `POSTGRES_DB`。
+
+一两分钟后可以核对。有文字的应变为 `body_status=ok` 且 `body_mode=full`；长图公告保持 `unconfirmed` 和 `summary`。若某篇有文字的仍是未确认，多半已不在接口当前这一页，把该源的 `next_fetch_at` 再设成 `now()` 看下一轮，不要手动改 `body_status`。
+
+```sql
+SELECT s.id, a.processing_state, a.body_status, p.body_mode, count(*)
+FROM articles a
+JOIN sources s ON s.id = a.source_id
+LEFT JOIN publications p ON p.article_id = a.id
+WHERE s.id IN ('df-official-notices', 'df-official-news', 'df-official-esports', 'df-steam-news')
+GROUP BY 1, 2, 3, 4
+ORDER BY 1, 2, 3, 4;
+```
 
 下面按时间从新到旧列出每次更新要注意的事。
 

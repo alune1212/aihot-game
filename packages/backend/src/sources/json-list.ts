@@ -141,8 +141,8 @@ function embeddedJson(html: string, source: SourceRow): unknown {
 
 /**
  * Body HTML from a per-item JSON document (`bodyUrlTemplate` + `bodyPath`). Empty text (a picture
- * of the announcement, with no words) and a failed read leave the entry without a body. One miss
- * does not fail the listing.
+ * of the announcement, with no words) and a failed read leave no body. One miss does not fail the
+ * listing; the entry is then recorded unconfirmed instead of fetching the article page.
  */
 async function jsonDetailBody(c: SourceRow["config"], item: unknown, pageUrl: string, headers: Record<string, string>): Promise<{ html: string; text: string } | null> {
   if (!c.bodyUrlTemplate || !c.bodyPath) return null;
@@ -204,6 +204,9 @@ export async function fetchJsonList(source: SourceRow): Promise<Candidate[]> {
     const summary = firstString(item, c.summaryPaths);
     const summaryIsBody = c.summaryIsBody === true && !!summary;
     const body = summaryIsBody ? null : await jsonDetailBody(c, item, url, headers);
+    // A configured detail document is the body. No words there (or a failed read) is unconfirmed,
+    // so a script-rendered article page is not fetched, with or without a reader key.
+    const detailConfigured = !summaryIsBody && !!(c.bodyUrlTemplate && c.bodyPath);
     out.push({
       url,
       title: collapseWhitespace(stripTags(title)),
@@ -212,7 +215,7 @@ export async function fetchJsonList(source: SourceRow): Promise<Candidate[]> {
       excerpt: summary ? collapseWhitespace(stripTags(summary)).slice(0, 2000) : null,
       bodyHtml: body?.html ?? null,
       bodyText: summaryIsBody ? stripTags(summary!) : body?.text ?? null,
-      bodyStatus: summaryIsBody || body ? "ok" : "pending",
+      bodyStatus: summaryIsBody || body ? "ok" : detailConfigured ? "unconfirmed" : "pending",
       raw: { externalId: externalId ?? null },
     });
   }

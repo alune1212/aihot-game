@@ -308,8 +308,8 @@ test("a JSON detail document supplies the body, and a shell page is not an error
   assert.match(byTitle["有正文"]?.bodyText ?? "", /干员朋友们好/);
   assert.equal(byTitle["有正文"]?.bodyStatus, "ok");
   assert.equal(byTitle["只有图"]?.bodyText ?? null, null);
-  assert.equal(byTitle["只有图"]?.bodyStatus, "pending");
-  assert.equal(byTitle["详情失败"]?.bodyStatus, "pending");
+  assert.equal(byTitle["只有图"]?.bodyStatus, "unconfirmed");
+  assert.equal(byTitle["详情失败"]?.bodyStatus, "unconfirmed");
   await assert.rejects(fetchJsonList(source({
     url: `${site}/bodies.json`, itemsPath: "items", titlePaths: ["title"], urlTemplate: "{raw:url}", bodyUrlTemplate: `${site}/body/{id}`,
   })), /bodyPath/);

@@ -299,6 +299,14 @@ async function upsertIn(db: Db, m: MaterialInput): Promise<MaterialResult> {
   const next = contentHash({ title, bodyText, excerpt });
   if (!time && existing!.content_hash === next) {
     await updatePresentation(db, existing!.id, { html: m.bodyHtml, media: m.media });
+    // The listing now says this page has no body. A pending row would otherwise keep fetching it.
+    if (m.bodyStatus === "unconfirmed" && !m.bodyText) {
+      const [row] = await db<{ id: string }[]>`
+        UPDATE articles SET body_status = 'unconfirmed', updated_at = now()
+        WHERE id = ${existing!.id} AND body_status = 'pending' AND processing_state = 'new'
+        RETURNING id`;
+      if (row) unchanged.processingNeeded = true;
+    }
     return unchanged;
   }
   if (!time && existing!.content_hash === null) {
