@@ -55,6 +55,15 @@ const pages: Record<string, () => string> = {
   "/zh/post": () => article("提升 token 效率", "智能体现在能用更少的 token 完成更长的运行。".repeat(12)),
   "/en/feed.xml": () => `<rss version="2.0"><channel><item><title>Improved token efficiency</title><link>${site}/en/post</link><pubDate>Wed, 23 Sep 2026 12:00:00 GMT</pubDate></item></channel></rss>`,
   "/en/items.json": () => JSON.stringify([{ title: "Improved token efficiency", url: `${site}/en/post` }]),
+  // A list whose body lives on a second JSON document. One item is a picture, one detail is down.
+  "/bodies.json": () => JSON.stringify({ items: [
+    { id: "text", title: "有正文", url: "https://example.org/text" },
+    { id: "picture", title: "只有图", url: "https://example.org/picture" },
+    { id: "down", title: "详情失败", url: "https://example.org/down" },
+  ] }),
+  "/body/text": () => JSON.stringify({ data: { html: "<p>干员朋友们好，这次更新调整了平衡。</p><p>匹配不受影响。</p>" } }),
+  "/body/picture": () => JSON.stringify({ data: { html: '<p><img src="https://example.org/note.jpg" alt=""></p><p>&nbsp;</p>' } }),
+  "/shell": () => `<html><head><title>公告</title></head><body><div id="app"></div></body></html>`,
 };
 function article(title: string, text: string) {
   return `<html><head><title>${title}</title><meta property="article:published_time" content="2026-09-23T12:00:00Z"></head><body><article><h1>${title}</h1><p>${text}</p></article></body></html>`;
@@ -67,8 +76,13 @@ const server = http.createServer((req, res) => {
     res.writeHead(307, { location: "/zh/post" });
     return res.end();
   }
+  if (path === "/body/down") {
+    res.writeHead(500, { "content-type": "application/json" });
+    return res.end('{"error":"down"}');
+  }
   const found = Object.hasOwn(pages, path);
-  res.writeHead(found ? 200 : 404, { "content-type": "text/html; charset=utf-8" });
+  const json = path.endsWith(".json") || path.startsWith("/body/");
+  res.writeHead(found ? 200 : 404, { "content-type": json ? "application/json" : "text/html; charset=utf-8" });
   res.end(found ? pages[path]!() : "");
 });
 await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
@@ -281,4 +295,31 @@ test("a source's language is an Accept-Language value, refused by kinds that rea
     }
   }
   for (const kind of ["x_search", "mp_account", "external"] as const) assert.deepEqual(unsupportedConfig(kind, { acceptLanguage: "en" }), ["acceptLanguage"], kind);
+});
+
+test("a JSON detail document supplies the body, and a shell page is not an error when no reader key is set", async () => {
+  assert.deepEqual(unsupportedConfig("json_list", { bodyUrlTemplate: "https://example.org/{id}", bodyPath: "data.html" }), []);
+  assert.deepEqual(unsupportedConfig("rss", { bodyUrlTemplate: "https://example.org/{id}", bodyPath: "data.html" }), ["bodyUrlTemplate", "bodyPath"]);
+  const items = await fetchJsonList(source({
+    url: `${site}/bodies.json`, itemsPath: "items", titlePaths: ["title"], urlTemplate: "{raw:url}",
+    bodyUrlTemplate: `${site}/body/{id}`, bodyPath: "data.html",
+  }));
+  const byTitle = Object.fromEntries(items.map((item) => [item.title, item]));
+  assert.match(byTitle["有正文"]?.bodyText ?? "", /干员朋友们好/);
+  assert.equal(byTitle["有正文"]?.bodyStatus, "ok");
+  assert.equal(byTitle["只有图"]?.bodyText ?? null, null);
+  assert.equal(byTitle["只有图"]?.bodyStatus, "pending");
+  assert.equal(byTitle["详情失败"]?.bodyStatus, "pending");
+  await assert.rejects(fetchJsonList(source({
+    url: `${site}/bodies.json`, itemsPath: "items", titlePaths: ["title"], urlTemplate: "{raw:url}", bodyUrlTemplate: `${site}/body/{id}`,
+  })), /bodyPath/);
+
+  const saved = process.env.JINA_API_KEY;
+  delete process.env.JINA_API_KEY;
+  try {
+    assert.equal(await extractFromUrl(`${site}/shell`, "article:shell"), null);
+  } finally {
+    if (saved === undefined) delete process.env.JINA_API_KEY;
+    else process.env.JINA_API_KEY = saved;
+  }
 });

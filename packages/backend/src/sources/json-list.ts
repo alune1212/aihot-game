@@ -3,6 +3,7 @@ import { credential } from "../config.ts";
 import { languageHeaders, requireOk } from "../lib/http-fetch.ts";
 import { JINA_PREFIX, jinaRead } from "../providers/jina.ts";
 import { fetchListing } from "./listing-fetch.ts";
+import { sanitizeBody } from "../content/sanitize.ts";
 import { collapseWhitespace, stripTags } from "../lib/text.ts";
 import { readPublicationDate, type PublicationDate } from "./dates.ts";
 import { FetchError, type Candidate, type SourceRow } from "./types.ts";
@@ -138,6 +139,27 @@ function embeddedJson(html: string, source: SourceRow): unknown {
   throw new FetchError(`embedded key ${key} not found`);
 }
 
+/**
+ * Body HTML from a per-item JSON document (`bodyUrlTemplate` + `bodyPath`). Empty text (a picture
+ * of the announcement, with no words) and a failed read leave the entry without a body. One miss
+ * does not fail the listing.
+ */
+async function jsonDetailBody(c: SourceRow["config"], item: unknown, pageUrl: string, headers: Record<string, string>): Promise<{ html: string; text: string } | null> {
+  if (!c.bodyUrlTemplate || !c.bodyPath) return null;
+  const bodyUrl = renderTemplate(String(c.bodyUrlTemplate), item);
+  if (!bodyUrl) return null;
+  try {
+    const detail = JSON.parse(requireOk(await fetchListing(bodyUrl, { redirectPolicy: "same-origin", headers, timeoutMs: 15_000 })).text());
+    const field = getPath(detail, String(c.bodyPath));
+    if (typeof field !== "string" || !field.trim()) return null;
+    const html = sanitizeBody(field, pageUrl);
+    const text = collapseWhitespace(stripTags(html));
+    return text ? { html, text } : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchJsonList(source: SourceRow): Promise<Candidate[]> {
   const c = source.config;
   const url = String(c.url ?? "");
@@ -169,6 +191,7 @@ export async function fetchJsonList(source: SourceRow): Promise<Candidate[]> {
   let items = c.itemsPath ? getPath(data, c.itemsPath) : c.jsonKey ? getPath(data, c.jsonKey) : data;
   if (c.itemsObjectValues && items && typeof items === "object" && !Array.isArray(items)) items = Object.values(items);
   if (!Array.isArray(items)) throw new FetchError("items path did not resolve to an array");
+  if ((c.bodyUrlTemplate && !c.bodyPath) || (c.bodyPath && !c.bodyUrlTemplate)) throw new FetchError("bodyUrlTemplate and bodyPath are set together");
 
   const out: Candidate[] = [];
   for (const item of items) {
@@ -180,14 +203,16 @@ export async function fetchJsonList(source: SourceRow): Promise<Candidate[]> {
     const externalId = c.externalIdPath ? getPath(item, c.externalIdPath) : null;
     const summary = firstString(item, c.summaryPaths);
     const summaryIsBody = c.summaryIsBody === true && !!summary;
+    const body = summaryIsBody ? null : await jsonDetailBody(c, item, url, headers);
     out.push({
       url,
       title: collapseWhitespace(stripTags(title)),
       author: firstString(item, c.authorPaths),
       ...toDate(getPath(item, c.publishedAtPath), c.publishedAtUnit, c.publishedAtUtcOffset),
       excerpt: summary ? collapseWhitespace(stripTags(summary)).slice(0, 2000) : null,
-      bodyText: summaryIsBody ? stripTags(summary!) : null,
-      bodyStatus: summaryIsBody ? "ok" : "pending",
+      bodyHtml: body?.html ?? null,
+      bodyText: summaryIsBody ? stripTags(summary!) : body?.text ?? null,
+      bodyStatus: summaryIsBody || body ? "ok" : "pending",
       raw: { externalId: externalId ?? null },
     });
   }

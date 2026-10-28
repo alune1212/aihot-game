@@ -87,6 +87,35 @@ docker compose run --rm setup && docker compose up -d
 
 新迁移遇到长期占锁会报出文件名和等待超时，先处理占锁事务，再重跑 setup，不要跳过迁移或改写迁移账本。并发索引创建中断可能留下无效索引：核实报错中的对象后，用 `DROP INDEX CONCURRENTLY <索引名>` 清理该失败索引再重跑；有效但定义不同的同名索引须先核对差异。这些保护不改变上述 Docker 更新顺序，跨旧版本升级仍可能执行历史上的破坏性迁移。
 
+#### 没有 Jina 时，三角洲信源也能出正文（2026 年 10 月 28 日）
+
+官网详情页是脚本渲染的，以前抓不到文字就会去调 Jina；没配 `JINA_API_KEY` 时这次调用直接报错，文章停在 `processing_state=new`、`body_status=pending`，公开页是空的。现在三件事一起做：Steam 订阅的 `description` 就是公告全文（`summaryIsBody`）；官网新闻和赛事从公开详情接口读取 `sContent`（`bodyUrlTemplate` / `bodyPath`）；仍然没有文字时（官网公告大多是一张长图）立刻记为正文未确认，按标题和摘要继续分析，不再重试一个永远不会成功的 Jina 调用。没有数据库迁移。
+
+种子遇到已有 id 会跳过，所以已经导入的 4 个信源要自己改配置。先停下 worker，再对库执行下面的语句，然后启动新版本。采集每分钟看一次到期信源，会把仍在列表里的文章补上正文并重新分析。只有长图、补不上文字的，15 分钟后按仅摘要继续，避免和补正文抢一次分析。
+
+```sql
+UPDATE sources
+SET config = config || '{"summaryIsBody": true}'::jsonb,
+    next_fetch_at = now(), updated_at = now()
+WHERE id = 'df-steam-news';
+
+UPDATE sources
+SET config = config || jsonb_build_object(
+      'bodyUrlTemplate', 'https://comm.ams.game.qq.com/ide/?iChartId=329870&iSubChartId=329870&sIdeToken=vDQriw&id={raw:iDocID}',
+      'bodyPath', 'jData.data.0.sContent'),
+    next_fetch_at = now(), updated_at = now()
+WHERE id IN ('df-official-notices', 'df-official-news', 'df-official-esports');
+
+UPDATE articles
+SET processing_error = NULL, processing_attempts = 0,
+    processing_retry_at = now() + interval '15 minutes', processing_queued_at = NULL
+WHERE source_id IN ('df-official-notices', 'df-official-news', 'df-official-esports', 'df-steam-news')
+  AND processing_state = 'new' AND body_status = 'pending'
+  AND processing_error LIKE 'extract: JINA_API_KEY%';
+```
+
+Docker 里对数据库执行：`docker compose exec -T db psql -U aihot -d aihot`，把上面的语句贴进去。库名或账号不同时，换成部署里的 `POSTGRES_USER` 和 `POSTGRES_DB`。
+
 下面按时间从新到旧列出每次更新要注意的事。
 
 日报缺期告警按北京时间的具体日期跟踪，跨午夜不会自动恢复；只有对应日报存在才发恢复通知。新缺期检查最近 7 个日历日（含今天），不早于最早的日报或 reports.compose 运行记录；没有历史记录时只检查今天。已告警的日期在这 7 天里一直跟踪，关闭采集/模型或 worker 启动宽限期也不会把缺期当成恢复；超出 7 天仍没有日报的，发一条“没能补出、停止提醒”后不再提醒。旧的 report.daily 状态自动按首次告警时间迁移，保留提醒间隔。出刊后两小时告警、每小时提醒及飞书开关保持不变；无需数据库迁移。自定义 responder 若按旧 `report.daily` 精确匹配，需改为识别 `report.daily:YYYY-MM-DD` 日期键。

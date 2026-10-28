@@ -1,5 +1,5 @@
 {
-  "$comment": "《三角洲行动》信源。首次启动导入（scripts/seed.ts），已存在的 id 不会被覆盖，从文件里删掉的也不会从库里删。官方资讯列表来自官网同款公开接口（comm.ams.game.qq.com/ide/，活动 670608 / 流程 1073310，令牌写在官网脚本里）。正文页是脚本渲染的，列表接口本身通常没有正文，站内全文常常只有标题和链接。",
+  "$comment": "《三角洲行动》信源。首次启动导入（scripts/seed.ts），已存在的 id 不会被覆盖，从文件里删掉的也不会从库里删。官方资讯列表来自官网同款公开接口（comm.ams.game.qq.com/ide/，活动 670608 / 流程 1073310，令牌写在官网脚本里）。详情页是脚本渲染的，正文在另一条公开详情接口的 sContent 里（bodyUrlTemplate）；没有文字、只有长图的公告不写入正文。Steam 订阅的 description 是公告全文。不配置 Jina。",
   "sources": [
     {
       "id": "df-official-notices",
@@ -15,6 +15,8 @@
         "publishedAtPath": "sIdxTime",
         "publishedAtUtcOffset": "+08:00",
         "externalIdPath": "iDocID",
+        "bodyUrlTemplate": "https://comm.ams.game.qq.com/ide/?iChartId=329870&iSubChartId=329870&sIdeToken=vDQriw&id={raw:iDocID}",
+        "bodyPath": "jData.data.0.sContent",
         "publisherUrlPrefixes": ["https://df.qq.com/cp/a20240906main/"],
         "_aihot": { "initialBackfillLimit": 12 }
       },
@@ -40,6 +42,8 @@
         "publishedAtPath": "sIdxTime",
         "publishedAtUtcOffset": "+08:00",
         "externalIdPath": "iDocID",
+        "bodyUrlTemplate": "https://comm.ams.game.qq.com/ide/?iChartId=329870&iSubChartId=329870&sIdeToken=vDQriw&id={raw:iDocID}",
+        "bodyPath": "jData.data.0.sContent",
         "publisherUrlPrefixes": ["https://df.qq.com/cp/a20240906main/"],
         "_aihot": { "initialBackfillLimit": 12 }
       },
@@ -65,6 +69,8 @@
         "publishedAtPath": "sIdxTime",
         "publishedAtUtcOffset": "+08:00",
         "externalIdPath": "iDocID",
+        "bodyUrlTemplate": "https://comm.ams.game.qq.com/ide/?iChartId=329870&iSubChartId=329870&sIdeToken=vDQriw&id={raw:iDocID}",
+        "bodyPath": "jData.data.0.sContent",
         "publisherUrlPrefixes": ["https://df.qq.com/cp/a20240906main/"],
         "_aihot": { "initialBackfillLimit": 12 }
       },
@@ -82,6 +88,7 @@
       "kind": "rss",
       "config": {
         "feedUrl": "https://store.steampowered.com/feeds/news/app/2507950/?cc=CN&l=schinese",
+        "summaryIsBody": true,
         "publisherUrlPrefixes": ["https://store.steampowered.com/news/app/2507950/"],
         "_aihot": { "initialBackfillLimit": 12 }
       },
