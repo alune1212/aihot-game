@@ -19,17 +19,17 @@ export const EDITION_WHEN = {
 };
 
 export const SITE = {
-  /** 站名：导航、页面标题、分享图、RSS、MCP、后台都用它。上线前请改成你要的名字。 */
-  name: "游讯",
+  /** 站名：导航、页面标题、分享图、RSS、MCP、后台都用它。短名；完整说法是「GameHot 游戏热点」。 */
+  name: "GameHot",
   /**
    * 行业词：拼进默认说法里，比如“AI 日报”“AI 动态”。
    * 改成“法律”“HR”“黄金”之类，页面上就会变成“法律日报”“法律动态”。
    */
   subject: "游戏",
   /** 首页的完整标题（浏览器标签、搜索结果）。 */
-  homeTitle: "游讯 — 游戏动态 · 版本、活动与改枪码",
+  homeTitle: "GameHot 游戏热点 — 版本、活动与改枪码",
   /** 主题目录页（/topics）的标题。 */
-  topicsTitle: "游戏主题：按游戏、玩法和内容形态看最新动态",
+  topicsTitle: "游戏热点：按游戏、玩法和内容形态看最新动态",
   /** 反馈表单输入框里的示例。 */
   feedbackExample: "例如：某把枪的改枪码过期了，我原本想按武器分类找到还能用的方案……",
   /** 反馈页标题下面的一句话。 */
@@ -41,9 +41,9 @@ export const SITE = {
   /** llms.txt 里一句话介绍下面的一段详细介绍（选填）。 */
   llmsIntro: null as string | null,
   /** 一行小字：分享图、海报下方。 */
-  tagline: "版本、活动和改枪码",
+  tagline: "游戏热点 · 版本、活动和改枪码",
   /** 搜索引擎读到的关键词（首页结构化数据）。 */
-  keywords: ["三角洲行动", "游戏资讯", "改枪码", "版本更新", "烽火地带", "全面战场"] as string[],
+  keywords: ["GameHot", "游戏热点", "三角洲行动", "改枪码", "版本更新", "烽火地带", "全面战场"] as string[],
   /** 网站开始收录的年份（结构化数据的时间范围，选填）。 */
   since: null as string | null,
   /** 界面语言（HTML lang、og:locale）。 */
@@ -53,10 +53,10 @@ export const SITE = {
   /** 标准图标（favicon.ico、icon.png、icon-192.png、apple-icon.png、logo.svg）以外也放在网站根目录的图标，site/brand/ 里的文件名（选填）；manifest.webmanifest 或外站引用了它们时用。 */
   rootIcons: [] as string[],
   /**
-   * MCP 工具名的前缀（小写字母、数字、下划线），工具会叫 youxun_get_latest、youxun_search……
+   * MCP 工具名的前缀（小写字母、数字、下划线），工具会叫 gamehot_get_latest、gamehot_search……
    * 已经有人接入后就不要再改。
    */
-  mcpPrefix: "youxun",
+  mcpPrefix: "gamehot",
   /**
    * 公开接口（MCP、OpenAPI、llms.txt）的版本号，只升不降。
    * 改了接口里已有的字段或含义时升主版本，并在部署说明里写清。
@@ -74,12 +74,12 @@ export const SITE = {
   github: "https://github.com/alune1212/aihot-game",
   /** 结构化数据里的网站运营者（搜索引擎用）。 */
   organization: {
-    name: "游讯",
+    name: "GameHot",
     /** 创始人（选填）。 */
     founder: null as Founder | null,
   },
   /** 抓取信源时报上的名字和版本（User-Agent 里用），不要冒用别的站。 */
-  crawlerName: "YouxunBot/1.0",
+  crawlerName: "GameHotBot/1.0",
 } as const;
 
 /** 使用规则和隐私说明两页（正文在 pages/ 里）。 */

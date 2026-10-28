@@ -1,11 +1,18 @@
-// 《三角洲行动》枪械名录。分类用游戏内的枪种（官方小程序数据接口的 mtype，
-// 以及官网「7 种枪型」的对应关系）：步枪含突击步枪和战斗步枪，精确射手步枪即官网所说的射手步枪，
-// 轻机枪含通用机枪。枪名按公开的游戏内名称整理，赛季加枪后要改这份名单。
+// 《三角洲行动》枪械名录。名字和枪种对照游戏数据里的物品名（deltaforce.th.gl 的物品表，
+// 与标注「数据来源：三角洲行动官方」的物品页一致）：步枪含突击步枪和战斗步枪，
+// 精确射手步枪即官网所说的射手步枪，轻机枪含通用机枪。
+// 基准价是占位、或只在体验服/官方预告里出现、改枪台还选不到的，不放进下面这份当前名单。
+import { beijingDate } from "@aihot/contracts/time";
 export interface Weapon {
   /** 页面上的名字，也是归类时用的规范名。 */
   name: string;
   /** 正文里可能出现的写法，长的排在前面匹配。 */
   aliases: string[];
+  /**
+   * 北京时间的上线日（含当天）。没写就是改枪台里已经能选。
+   * 到这一天之前，页面和接口都不列出它；文章里如果已经写了这个名字，仍会先记下来。
+   */
+  availableFrom?: string;
 }
 
 export interface WeaponCategory {
@@ -19,6 +26,12 @@ export const GAME_ID = "delta-force";
 export const GAME_NAME = "三角洲行动";
 
 const w = (name: string, ...extra: string[]): Weapon => ({ name, aliases: [name, ...extra] });
+const upcoming = (availableFrom: string, name: string, ...extra: string[]): Weapon => ({ name, aliases: [name, ...extra], availableFrom });
+
+/** 北京时间的日历日，用来判断「这一天起才能在改枪台选到」。 */
+export function isWeaponListed(weapon: Weapon, now = new Date()): boolean {
+  return !weapon.availableFrom || weapon.availableFrom <= beijingDate(now);
+}
 
 export const WEAPON_CATEGORIES: readonly WeaponCategory[] = [
   {
@@ -28,23 +41,29 @@ export const WEAPON_CATEGORIES: readonly WeaponCategory[] = [
     weapons: [
       w("M4A1突击步枪", "M4A1"),
       w("AKM突击步枪", "AKM"),
-      w("K416突击步枪", "K416", "HK416"),
-      w("AK-12突击步枪", "AK-12", "AK12"),
-      w("AUG突击步枪", "AUG"),
       w("QBZ95-1突击步枪", "QBZ95-1", "QBZ-95-1", "95-1"),
       w("AKS-74U突击步枪", "AKS-74U", "AKS74U"),
+      w("ASh-12战斗步枪", "ASh-12", "ASh12", "ASH-12"),
+      w("K416突击步枪", "K416", "HK416"),
+      w("M16A4突击步枪", "M16A4"),
+      w("AUG突击步枪", "AUG"),
       w("M7战斗步枪", "M7"),
+      w("SG552突击步枪", "SG552"),
+      w("AK-12突击步枪", "AK-12", "AK12"),
       w("SCAR-H战斗步枪", "SCAR-H", "SCARH"),
       w("G3战斗步枪", "G3"),
-      w("K437突击步枪", "K437"),
       w("PTR-32突击步枪", "PTR-32", "PTR32"),
-      w("KC17突击步枪", "KC17"),
+      w("CAR-15突击步枪", "CAR-15", "CAR15"),
+      w("AS Val突击步枪", "AS Val", "AS-Val", "ASVal"),
+      w("腾龙突击步枪", "腾龙", "CI-19"),
+      w("K437突击步枪", "K437"),
+      w("KC17突击步枪", "KC17", "KC-17"),
       w("MK47突击步枪", "MK47"),
-      w("MCX LT突击步枪", "MCX LT", "MCX"),
-      w("AR-57突击步枪", "AR-57", "AR57"),
+      w("MCX LT突击步枪", "MCX LT", "MCX-LT", "MCX"),
+      w("AR57突击步枪", "AR57", "AR-57"),
       w("RM277突击步枪", "RM277"),
       w("MDR突击步枪", "MDR"),
-      w("AN-94突击步枪", "AN-94", "AN94"),
+      upcoming("2026-11-05", "AN94突击步枪", "AN94", "AN-94"),
     ],
   },
   {
@@ -79,8 +98,8 @@ export const WEAPON_CATEGORIES: readonly WeaponCategory[] = [
       w("PSG-1射手步枪", "PSG-1", "PSG1"),
       w("SR9射手步枪", "SR9"),
       w("VSS射手步枪", "VSS"),
-      w("SVCH射手步枪", "SVCH"),
-      w("Marlin杠杆步枪", "Marlin"),
+      w("SVCH精确射手步枪", "SVCH"),
+      w("杠杆式步枪", "Marlin", "Marlin杠杆步枪"),
     ],
   },
   {
@@ -114,7 +133,8 @@ export const WEAPON_CATEGORIES: readonly WeaponCategory[] = [
       w("M870霰弹枪", "M870"),
       w("M1014霰弹枪", "M1014"),
       w("S12K霰弹枪", "S12K"),
-      w("FS12霰弹枪", "FS12"),
+      w("725双管霰弹枪", "725", "725双管散弹枪"),
+      w("FS-12霰弹枪", "FS-12", "FS12"),
     ],
   },
   {
@@ -122,13 +142,13 @@ export const WEAPON_CATEGORIES: readonly WeaponCategory[] = [
     label: "手枪",
     note: "",
     weapons: [
-      w("G18手枪", "G18"),
-      w("G17手枪", "G17"),
-      w("QSZ92G手枪", "QSZ92", "QSZ-92"),
+      w("QSZ92G", "QSZ92G手枪", "QSZ92", "QSZ-92"),
+      w(".357左轮", "357左轮", ".357", "左轮"),
       w("沙漠之鹰", "沙鹰"),
-      w("93R手枪", "93R"),
-      w("357左轮", ".357", "左轮"),
-      w("M1911手枪", "M1911"),
+      w("G18", "G18手枪"),
+      w("93R", "93R手枪"),
+      w("G17", "G17手枪"),
+      w("M1911", "M1911手枪"),
     ],
   },
   {

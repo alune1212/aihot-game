@@ -1,5 +1,5 @@
 import type { Db } from "@aihot/backend/db";
-import { GAME_ID, WEAPON_CATEGORIES, type WeaponCategory } from "./catalog.ts";
+import { GAME_ID, isWeaponListed, WEAPON_CATEGORIES, type WeaponCategory } from "./catalog.ts";
 import { extractLoadouts } from "./extract.ts";
 
 export interface LoadoutCode {
@@ -79,7 +79,7 @@ export async function listLoadouts(db: Db, gameId = GAME_ID): Promise<{ gameId: 
       key: category.key,
       label: category.label,
       note: category.note,
-      weapons: category.weapons.map((weapon) => ({ name: weapon.name, codes: byWeapon.get(weapon.name) ?? [] })),
+      weapons: category.weapons.filter((weapon) => isWeaponListed(weapon)).map((weapon) => ({ name: weapon.name, codes: byWeapon.get(weapon.name) ?? [] })),
     })),
   };
 }

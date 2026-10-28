@@ -1,10 +1,20 @@
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
 import { closeDb, sql } from "@aihot/backend/db";
+import { isWeaponListed, WEAPON_CATEGORIES } from "../catalog.ts";
 import { extractLoadouts } from "../extract.ts";
 import { listLoadouts, syncArticleLoadouts } from "../store.ts";
 
 after(closeDb);
+
+test("AN94 stays off the gun bench until the announced release date", () => {
+  const rifles = WEAPON_CATEGORIES.find((category) => category.key === "rifle")!;
+  const an94 = rifles.weapons.find((weapon) => weapon.name === "AN94突击步枪")!;
+  assert.equal(isWeaponListed(an94, new Date("2026-11-04T16:00:00+08:00")), false);
+  assert.equal(isWeaponListed(an94, new Date("2026-11-05T00:30:00+08:00")), true);
+  const found = extractLoadouts("11月5日 AN94突击步枪 烽火地带 改枪码：An940001");
+  assert.equal(found[0]?.weapon, "AN94突击步枪");
+});
 
 test("a paragraph with a weapon and a share code becomes one loadout", () => {
   const found = extractLoadouts("M4A1突击步枪，烽火地带。\n改枪码：Ab12cd34\n价格：35000\n作者：洲宝");
