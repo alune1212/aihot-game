@@ -59,7 +59,7 @@ export const WEAPON_CATEGORIES: readonly WeaponCategory[] = [
       w("K437突击步枪", "K437"),
       w("KC17突击步枪", "KC17", "KC-17"),
       w("MK47突击步枪", "MK47"),
-      w("MCX LT突击步枪", "MCX LT", "MCX-LT", "MCX"),
+      w("MCX LT突击步枪", "MCX LT", "MCX-LT", "MCX突击步枪", "MCX"),
       w("AR57突击步枪", "AR57", "AR-57"),
       w("RM277突击步枪", "RM277"),
       w("MDR突击步枪", "MDR"),
@@ -98,8 +98,8 @@ export const WEAPON_CATEGORIES: readonly WeaponCategory[] = [
       w("PSG-1射手步枪", "PSG-1", "PSG1"),
       w("SR9射手步枪", "SR9"),
       w("VSS射手步枪", "VSS"),
-      w("SVCH精确射手步枪", "SVCH"),
-      w("杠杆式步枪", "Marlin", "Marlin杠杆步枪"),
+      w("SVCH精确射手步枪", "SVCH射手步枪", "SVCH"),
+      w("杠杆式步枪", "Marlin射手步枪", "Marlin", "Marlin杠杆步枪"),
     ],
   },
   {
@@ -155,7 +155,7 @@ export const WEAPON_CATEGORIES: readonly WeaponCategory[] = [
     key: "special",
     label: "特殊武器",
     note: "上线后增加的、不在最初七种枪型里的武器。",
-    weapons: [w("复合弓", "复合弓")],
+    weapons: [w("复合弓", "复合弓射手步枪")],
   },
 ];
 
@@ -171,3 +171,19 @@ export const WEAPON_MATCHERS: ReadonlyArray<{ categoryKey: string; categoryLabel
       })),
     ),
   ).sort((a, b) => b.alias.length - a.alias.length);
+
+function boundary(alias: string): RegExp {
+  const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  if (/^[A-Za-z0-9]/.test(alias) && /[A-Za-z0-9]$/.test(alias)) return new RegExp(`(?<![A-Za-z0-9])${escaped}(?![A-Za-z0-9])`, "i");
+  return new RegExp(escaped, "i");
+}
+
+/** 一段枪名（或改枪码前缀）对上名录里的哪一把。对不上就返回 null，调用方不要猜。 */
+export function matchWeapon(text: string): { categoryKey: string; weapon: string } | null {
+  const normalized = text.normalize("NFKC").trim();
+  if (!normalized) return null;
+  for (const item of WEAPON_MATCHERS) {
+    if (boundary(item.alias).test(normalized)) return { categoryKey: item.categoryKey, weapon: item.weapon };
+  }
+  return null;
+}

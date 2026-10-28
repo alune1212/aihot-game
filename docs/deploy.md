@@ -62,6 +62,10 @@ MCP 默认接受 `SITE_URL` 的主机以及 `localhost`、`127.0.0.1`、`[::1]`�
 
 ### 更新
 
+#### 改枪码从云码库和洲械库定时抓取（2026 年 10 月 28 日）
+
+`loadout_codes` 增加可空列 `source`、`fetched_at`，新增表 `loadout_feeds`（每个聚合站最近一次抓取是否成功、`last_error`）。已有的改枪码都保留，不改文章。不需要新的环境变量或密钥。worker 在 `COLLECT_ENABLED=true` 时每 6 小时抓一次公开页面，走已有的 `EGRESS_PROXY_URL`（没设就直连）。赛季开始日和优先主播名单在 `modules/loadouts/feeds.ts`，抓哪些页、什么码会丢掉，见 `modules/loadouts/README.md`。把 `SEASON_START` 改成下一季（「微光」2026-11-05）之后，更早的码仍留在库里，页面标成过季并排到后面。
+
 #### 改成《三角洲行动》游戏站（2026 年 10 月 28 日）
 
 这次会新增表 `loadout_codes`（改枪码）和它的索引，迁移由 `setup` 自动执行，不改已有文章。`industry/sources.json` 换成了 4 个已核对能打开的来源。种子是 `ON CONFLICT (id) DO NOTHING`：库里已经有的那 18 个 AI 示范信源不会被覆盖，也不会被删掉，仍会继续抓。升级后到后台「信源」把旧源暂停或删除；新源要等下一次 `setup`（或 `node --env-file=.env scripts/seed.ts`）才会补进库。分类、主题和提示词改的是文件，重新构建并重启 api / worker / web 后，新进来的文章按新标准处理；已经写好的旧文章不会自动重跑。改枪码页在 `/loadouts`，只有正文里写了「改枪码 / 方案码 / 分享码」并且能对上枪名时才会出现条目。官方小程序里的方案码没有公开接口，这个页面一开始会是空的。

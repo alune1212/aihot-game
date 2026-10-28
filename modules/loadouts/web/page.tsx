@@ -14,8 +14,11 @@ interface LoadoutCode {
   mode: string | null;
   priceText: string | null;
   author: string | null;
+  source: string | null;
   sourceUrl: string | null;
-  notedAt: string | null;
+  postedOn: string | null;
+  featured: boolean;
+  stale: boolean;
 }
 
 interface Payload {
@@ -36,7 +39,7 @@ export function meta({ data }: { data?: Payload }) {
   const name = data?.game.name ?? "三角洲行动";
   return pageMeta({
     title: `${name}改枪码 · ${SITE.name}`,
-    description: `按${name}的枪种和枪名查看改枪码。码从已采集的文章里抽出，导入前请回游戏里核对。`,
+    description: `按${name}的枪种和枪名查看改枪码，带来源和作者。导入前请回游戏里核对。`,
     path: "/loadouts",
   });
 }
@@ -102,9 +105,11 @@ export default function LoadoutsPage() {
                       {weapon.codes.map((code) => (
                         <li key={code.code} className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
-                            <p className="break-all font-mono text-[13px] text-ink">{code.code}</p>
+                            <p className={`break-all font-mono text-[13px] ${code.stale ? "text-ink-4" : "text-ink"}`}>{code.code}</p>
                             <p className="mt-0.5 text-[12px] text-ink-4">
-                              {[code.mode, code.priceText ? `${code.priceText}` : null, code.author].filter(Boolean).join(" · ") || "未注明模式"}
+                              {[code.mode, code.priceText, code.author, code.source, code.postedOn].filter(Boolean).join(" · ") || "未注明模式"}
+                              {code.featured ? " · 主播" : ""}
+                              {code.stale ? " · 过季" : ""}
                               {code.sourceUrl ? <> · <a href={code.sourceUrl} className="text-accent hover:underline">来源</a></> : null}
                             </p>
                           </div>
@@ -113,7 +118,7 @@ export default function LoadoutsPage() {
                       ))}
                     </ul>
                   ) : (
-                    <p className="mt-1 text-[12.5px] leading-relaxed text-ink-4">还没有从文章里抽出这把枪的改枪码。</p>
+                    <p className="mt-1 text-[12.5px] leading-relaxed text-ink-4">还没有这把枪的改枪码。</p>
                   )}
                 </li>
               ))}
