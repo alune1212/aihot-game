@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+Disallow: /admin/
+Disallow: /api/
+Disallow: /*?action=*
+Disallow: /login.php
+Disallow: /*.sql$
+
+User-agent: SemrushBot
+Disallow: /
