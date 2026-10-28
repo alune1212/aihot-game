@@ -1,6 +1,6 @@
 // Share images only need public title/summary metadata. Keep the same page visibility rule without
 // loading bodies, translations, related stories or signed media that never appear on these cards.
-import { CATEGORY_LABELS, type CategoryKey } from '@aihot/contracts/taxonomy';
+import { CATEGORY_LABELS, isCategoryKey, type CategoryKey } from '@aihot/contracts/taxonomy';
 import { beijingDate } from '@aihot/contracts/time';
 import { ITEM_COPY, withSubject } from '@aihot/site';
 import type { OgCard } from '../media/og.ts';
@@ -26,7 +26,7 @@ export async function loadItemOgCard(id: string): Promise<OgCard | null> {
   const item = await loadItemShare(id);
   if (!item) return null;
   return {
-    kicker: item.category ? CATEGORY_LABELS[item.category] : withSubject('动态'),
+    kicker: item.category && isCategoryKey(item.category) ? CATEGORY_LABELS[item.category] : withSubject('动态'),
     title: item.title,
     subtitle: item.summary,
     meta: `${item.source.name} · ${beijingDate(item.timelineAt)}`,

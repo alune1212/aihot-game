@@ -1,0 +1,8 @@
+{
+  "name": "@aihot/loadouts",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./*": "./*.ts"
+  }
+}

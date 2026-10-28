@@ -2,7 +2,7 @@
 // gets a card; anything else is a real 404.
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { reportDateLabel } from "@aihot/contracts/site";
-import { CATEGORY_LABELS } from "@aihot/contracts/taxonomy";
+import { CATEGORY_LABELS, isCategoryKey } from "@aihot/contracts/taxonomy";
 import { beijingDate } from "@aihot/contracts/time";
 import { loadItemOgCard, loadItemShare } from "@aihot/backend/publication/og";
 import { loadReport, type ReportKind } from "@aihot/backend/publication/reports";
@@ -64,7 +64,7 @@ export function registerOg(app: FastifyInstance) {
     if (!d) return notFound(reply);
     const poster: Poster = {
       url: `${config.siteUrl}/items/${d.id}`,
-      kicker: d.category ? CATEGORY_LABELS[d.category] : withSubject("动态"),
+      kicker: d.category && isCategoryKey(d.category) ? CATEGORY_LABELS[d.category] : withSubject("动态"),
       title: d.title,
       summary: d.summary,
       source: d.source.name,
