@@ -17,6 +17,7 @@ interface LoadoutCode {
   source: string | null;
   sourceUrl: string | null;
   postedOn: string | null;
+  popularityText: string | null;
   featured: boolean;
   stale: boolean;
 }
@@ -107,7 +108,7 @@ export default function LoadoutsPage() {
                           <div className="min-w-0">
                             <p className={`break-all font-mono text-[13px] ${code.stale ? "text-ink-4" : "text-ink"}`}>{code.code}</p>
                             <p className="mt-0.5 text-[12px] text-ink-4">
-                              {[code.mode, code.priceText, code.author, code.source, code.postedOn].filter(Boolean).join(" · ") || "未注明模式"}
+                              {[code.mode, code.priceText, code.popularityText, code.author, code.source, code.postedOn].filter(Boolean).join(" · ") || "未注明模式"}
                               {code.featured ? " · 主播" : ""}
                               {code.stale ? " · 过季" : ""}
                               {code.sourceUrl ? <> · <a href={code.sourceUrl} className="text-accent hover:underline">来源</a></> : null}

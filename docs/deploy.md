@@ -62,6 +62,10 @@ MCP 默认接受 `SITE_URL` 的主机以及 `localhost`、`127.0.0.1`、`[::1]`�
 
 ### 更新
 
+#### 改枪码增加有力气官方热门（2026 年 10 月 29 日）
+
+`loadout_codes` 增加可空列 `popularity`（有力气官方热门的应用次数；云码库、洲械库和文章抽出的码为空）。已有改枪码都保留，不改文章。不需要新的密钥：公开 anon key 有默认值，只有对方轮换后才设 `YUFAN_SUPABASE_ANON_KEY`。数据在 `supabase.co`，不是 `.cn`；设了 `EGRESS_PROXY_URL` 会走出网代理，没设就直连。升级后下一次 `loadouts.fetch`（或后台手动跑这个任务）会写入 `loadout_feeds` 的 `yufan`。抓什么、什么码会丢掉，见 `modules/loadouts/README.md`。
+
 #### 改枪码从云码库和洲械库定时抓取（2026 年 10 月 28 日）
 
 `loadout_codes` 增加可空列 `source`、`fetched_at`，新增表 `loadout_feeds`（每个聚合站最近一次抓取是否成功、`last_error`）。已有的改枪码都保留，不改文章。不需要新的环境变量或密钥。worker 在 `COLLECT_ENABLED=true` 时每 6 小时抓一次公开页面，走已有的 `EGRESS_PROXY_URL`（没设就直连）。赛季开始日和优先主播名单在 `modules/loadouts/feeds.ts`，抓哪些页、什么码会丢掉，见 `modules/loadouts/README.md`。把 `SEASON_START` 改成下一季（「微光」2026-11-05）之后，更早的码仍留在库里，页面标成过季并排到后面。

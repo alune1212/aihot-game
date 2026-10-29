@@ -1,0 +1,122 @@
+[
+  {
+    "solution_code": "M250通用机枪-烽火地带-6LHR6VK04AP30SQDG0N2R",
+    "arms_name": "M250通用机枪",
+    "author_nickname": "鼠哈哈",
+    "price": 608382,
+    "apply_num": 863888,
+    "synced_at": "2026-10-29T00:30:12.676+00:00",
+    "is_hidden": false,
+    "source": "official"
+  },
+  {
+    "solution_code": "K437突击步枪-烽火地带-6OFFICIALHOT1234567",
+    "arms_name": "K437突击步枪",
+    "author_nickname": "SYG丨成成大王",
+    "price": 185000,
+    "apply_num": 1200,
+    "synced_at": "2026-10-29T00:30:12.676+00:00",
+    "is_hidden": false,
+    "source": "official"
+  },
+  {
+    "solution_code": "冲锋枪-烽火地带-6P90FALLBACK1234567",
+    "arms_name": "P90冲锋枪",
+    "author_nickname": "巾凡",
+    "price": 35000,
+    "apply_num": 40000,
+    "synced_at": "2026-10-29T00:30:12.676+00:00",
+    "is_hidden": false,
+    "source": "official"
+  },
+  {
+    "solution_code": "M4A1突击步枪-烽火地带-6STALEOFFICIAL12345",
+    "arms_name": "M4A1突击步枪",
+    "author_nickname": "旧方案",
+    "price": 10000,
+    "apply_num": 9,
+    "synced_at": "2026-09-03T15:00:00.000Z",
+    "is_hidden": false,
+    "source": "official"
+  },
+  {
+    "solution_code": "Vector冲锋枪-全面战场-6HIDDENOFFICIAL1234",
+    "arms_name": "Vector冲锋枪",
+    "author_nickname": "隐藏",
+    "price": 1,
+    "apply_num": 1,
+    "synced_at": "2026-10-29T00:30:12.676+00:00",
+    "is_hidden": true,
+    "source": "official"
+  },
+  {
+    "solution_code": "725双管霰弹枪-烽火带-6BADMODECODE123456",
+    "arms_name": "725双管霰弹枪",
+    "author_nickname": "错模式",
+    "price": 1,
+    "apply_num": 1,
+    "synced_at": "2026-10-29T00:30:12.676+00:00",
+    "is_hidden": false,
+    "source": "official"
+  },
+  {
+    "solution_code": "没这把枪-烽火地带-6UNKNOWNGUN1234567",
+    "arms_name": "没这把枪",
+    "author_nickname": "路人",
+    "price": null,
+    "apply_num": 10,
+    "synced_at": "2026-10-29T00:30:12.676+00:00",
+    "is_hidden": false,
+    "source": "official"
+  },
+  {
+    "solution_code": " MP5冲锋枪-烽火地带-6LEADSPACE123456789",
+    "arms_name": "MP5冲锋枪",
+    "author_nickname": "  天霸Mad98  ",
+    "price": 0,
+    "apply_num": 22000,
+    "synced_at": "2026-10-28T16:30:00.000Z",
+    "is_hidden": false,
+    "source": "official"
+  },
+  {
+    "solution_code": "M16A4突击步枪-烽火地带-6SEASONEDGE1234567",
+    "arms_name": "M16A4突击步枪",
+    "author_nickname": "赛季当天",
+    "price": 10000,
+    "apply_num": 3,
+    "synced_at": "2026-09-03T16:00:00.000Z",
+    "is_hidden": false,
+    "source": "official"
+  },
+  {
+    "solution_code": "SCAR-H战斗步枪-黑潮爆破-6HEICHAOCODE123456",
+    "arms_name": "SCARH战斗步枪",
+    "author_nickname": "黑羽",
+    "price": 1043942,
+    "apply_num": 80,
+    "synced_at": "2026-10-29T00:30:12.676+00:00",
+    "is_hidden": false,
+    "source": "official"
+  },
+  {
+    "solution_code": "AKM突击步枪-烽火地带-6CUSTOMSOURCE123456",
+    "arms_name": "AKM突击步枪",
+    "author_nickname": "玩家",
+    "price": 20000,
+    "apply_num": 5,
+    "synced_at": "2026-10-29T00:30:12.676+00:00",
+    "is_hidden": false,
+    "source": "custom"
+  },
+  {
+    "solution_code": "G18-烽火地带-6NODATECODE12345678",
+    "arms_name": "G18",
+    "author_nickname": null,
+    "price": null,
+    "apply_num": 2.5,
+    "synced_at": "not-a-date",
+    "is_hidden": false,
+    "source": "official"
+  }
+]

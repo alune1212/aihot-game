@@ -6,7 +6,7 @@ import { fetchLoadoutFeeds } from "./fetch.ts";
 import { SEASON_START } from "./feeds.ts";
 import { listLoadouts, syncArticleLoadouts } from "./store.ts";
 
-const note = `来自云码库、洲械库，以及写明了枪名的文章。早于 ${SEASON_START} 的不新收录，换季后更早的码会标成过季。导入前请回游戏里核对。`;
+const note = `来自有力气的官方热门、云码库、洲械库，以及写明了枪名的文章。早于 ${SEASON_START} 的不新收录，换季后更早的码会标成过季。导入前请回游戏里核对。`;
 
 export default defineServerModule({
   name: "loadouts",
@@ -59,7 +59,7 @@ export default defineServerModule({
     },
   },
   llms: () => ({
-    pages: [`- [改枪码](/loadouts): 按《${GAME_NAME}》的枪种和枪名浏览改枪码，来自云码库、洲械库和已采集文章`],
+    pages: [`- [改枪码](/loadouts): 按《${GAME_NAME}》的枪种和枪名浏览改枪码，来自有力气官方热门、云码库、洲械库和已采集文章`],
     api: ["- GET /api/loadouts — 改枪码，按枪种和枪名分组，带作者和来源"],
   }),
   sitemap: {

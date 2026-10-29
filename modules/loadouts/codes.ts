@@ -10,6 +10,8 @@ export interface RawLoadout {
   /** 发布日，YYYY-MM-DD（北京时间）。没有就是 null，不按过季丢。 */
   postedOn: string | null;
   sourceUrl: string;
+  /** 应用次数。没有就不参与热度排序。 */
+  popularity?: number | null;
 }
 
 export interface FeedRow {
@@ -21,6 +23,7 @@ export interface FeedRow {
   author: string | null;
   sourceUrl: string;
   postedOn: string | null;
+  popularity: number | null;
 }
 
 export type Decision =
@@ -46,6 +49,21 @@ function priceOf(value: string | null): string | null {
   return price.slice(0, 40);
 }
 
+/** 应用次数。不是 0 到 int4 的整数就当成没有，避免一行脏数据让整次写入失败。 */
+export function popularityOf(value: number | null | undefined): number | null {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > 2_147_483_647) return null;
+  return value;
+}
+
+/** 页面上的应用次数。没有、或是 0，就不显示。 */
+export function formatApplyCount(value: number | null | undefined): string | null {
+  const count = popularityOf(value);
+  if (count == null || count <= 0) return null;
+  if (count < 10000) return `应用 ${count}`;
+  const wan = Math.round(count / 1000) / 10;
+  return `应用 ${wan}万`;
+}
+
 /** 一条原始记录收不收、收成哪把枪。 */
 export function decideLoadout(raw: RawLoadout): Decision {
   const code = cleanCode(raw.code);
@@ -66,6 +84,7 @@ export function decideLoadout(raw: RawLoadout): Decision {
     author: authorOf(raw.author),
     sourceUrl: raw.sourceUrl,
     postedOn,
+    popularity: popularityOf(raw.popularity),
   };
   if (postedOn && postedOn < SEASON_START) return { ok: false, reason: "stale", row };
   return { ok: true, row };
@@ -89,6 +108,7 @@ export function mergeRaw(raws: readonly RawLoadout[]): RawLoadout[] {
       priceText: prev.priceText ?? raw.priceText,
       postedOn: prev.postedOn ?? raw.postedOn,
       sourceUrl: prev.sourceUrl || raw.sourceUrl,
+      popularity: prev.popularity ?? raw.popularity ?? null,
     });
   }
   return [...map.values()];

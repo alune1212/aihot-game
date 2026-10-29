@@ -1,11 +1,13 @@
-// 每 6 小时抓一次两个聚合站。只在 COLLECT_ENABLED=true 时由 worker 排程（和信源采集同一个开关）。
-// 请求走 guardedFetch：设了 EGRESS_PROXY_URL 就走出网代理，.cn 按框架规则直连。不需要新的密钥。
+// 每 6 小时抓一次聚合站。只在 COLLECT_ENABLED=true 时由 worker 排程（和信源采集同一个开关）。
+// 请求走 guardedFetch：设了 EGRESS_PROXY_URL 就走出网代理，.cn 按框架规则直连。
+// 有力气的表在 supabase.co，不是 .cn：没设代理就直连，设了就走代理。anon key 放在请求头里，不进 URL。
 import { SITE } from "@aihot/site";
 import { guardedFetch } from "@aihot/backend/lib/http-fetch";
 import { sql } from "@aihot/backend/db";
 import { decideLoadout, mergeRaw, type FeedRow, type RawLoadout } from "./codes.ts";
-import { SJZGQ_HOME, YUNMAKU_MODES, YUNMAKU_ORIGIN, yunmakuListUrl } from "./feeds.ts";
+import { OFFICIAL_FEED_ID, SJZGQ_HOME, YUFAN_API_ORIGIN, YUFAN_ORIGIN, YUFAN_PAGE, YUFAN_ROW_CAP, YUNMAKU_MODES, YUNMAKU_ORIGIN, yufanApiHeaders, yufanCodesUrl, yunmakuListUrl } from "./feeds.ts";
 import { parseSjzgqCatalog, parseSjzgqHtml, sjzgqScriptUrl } from "./parse-sjzgq.ts";
+import { parseYufan } from "./parse-yufan.ts";
 import { parseYunmaku } from "./parse-yunmaku.ts";
 import { mayFetch } from "./robots.ts";
 import { noteStaleLoadouts, recordFeedFailure, recordFeedSuccess, saveFeedLoadout } from "./store.ts";
@@ -19,7 +21,11 @@ export interface PageResponse {
   text(): string;
 }
 
-export type PageFetch = (url: string) => Promise<PageResponse>;
+export interface PageInit {
+  headers?: Record<string, string>;
+}
+
+export type PageFetch = (url: string, init?: PageInit) => Promise<PageResponse>;
 
 export interface Gathered {
   rows: FeedRow[];
@@ -34,9 +40,9 @@ async function pause(sleep: (ms: number) => Promise<void>): Promise<void> {
   await sleep(REQUEST_GAP_MS);
 }
 
-async function readPage(fetchPage: PageFetch, sleep: (ms: number) => Promise<void>, url: string): Promise<string> {
+async function readPage(fetchPage: PageFetch, sleep: (ms: number) => Promise<void>, url: string, init?: PageInit): Promise<string> {
   await pause(sleep);
-  const res = await fetchPage(url);
+  const res = await fetchPage(url, init);
   if (res.status !== 200) throw new Error(`HTTP ${res.status} for ${url}`);
   return res.text();
 }
@@ -156,6 +162,21 @@ export async function gatherSjzgq(fetchPage: PageFetch, sleep: (ms: number) => P
   return { ...classify(raws), warning };
 }
 
+/** 有力气：官方热门的公开表。页面 robots 和接口所在主机的 robots 都要允许。 */
+export async function gatherYufan(fetchPage: PageFetch, sleep: (ms: number) => Promise<void>): Promise<Gathered> {
+  const siteRobots = await robotsOf(fetchPage, sleep, new URL("/robots.txt", YUFAN_ORIGIN).toString());
+  if (!allow(siteRobots.status, siteRobots.body, YUFAN_PAGE)) throw new Error("robots.txt 不允许抓取有力气");
+  const apiRobots = await robotsOf(fetchPage, sleep, new URL("/robots.txt", YUFAN_API_ORIGIN).toString());
+  const apiUrl = yufanCodesUrl();
+  if (!allow(apiRobots.status, apiRobots.body, apiUrl)) throw new Error("robots.txt 不允许抓取有力气改枪码接口");
+  const body = await readPage(fetchPage, sleep, apiUrl, { headers: yufanApiHeaders() });
+  const parsed = parseYufan(body, YUFAN_PAGE);
+  if (!parsed.raws.length) throw new Error("有力气接口里没有改枪码");
+  const gathered = classify(parsed.raws);
+  if (parsed.rows >= YUFAN_ROW_CAP) gathered.warning = `有力气返回了 ${YUFAN_ROW_CAP} 条，可能还有没抓完的`;
+  return gathered;
+}
+
 function summarize(sourceName: string, gathered: Gathered, counts: { inserted: number; updated: number; kept: number; staleNoted: number }): string {
   const modes = Object.entries(gathered.byMode).map(([mode, count]) => `${mode} ${count}`).join("，");
   const unmapped = gathered.unmapped.slice(0, 12).join("、");
@@ -169,17 +190,19 @@ function summarize(sourceName: string, gathered: Gathered, counts: { inserted: n
   ].filter(Boolean).join("。").slice(0, 500);
 }
 
-async function defaultFetch(url: string): Promise<PageResponse> {
-  const res = await guardedFetch(url, { route: "egress", timeoutMs: 25_000, maxBytes: 3_000_000 });
+async function defaultFetch(url: string, init?: PageInit): Promise<PageResponse> {
+  const res = await guardedFetch(url, { route: "egress", timeoutMs: 25_000, maxBytes: 3_000_000, headers: init?.headers });
   return { status: res.status, text: () => res.text() };
 }
 
+// 有力气先抓：同一轮里新出现的重复码归官方热门。库里已经有的码不会被后来的站改掉。
 const SOURCES = [
+  { id: OFFICIAL_FEED_ID, name: "有力气", gather: gatherYufan },
   { id: "yunmaku", name: "云码库", gather: gatherYunmaku },
   { id: "sjzgq", name: "洲械库", gather: gatherSjzgq },
 ] as const;
 
-/** 两个站各抓各的：一个失败不影响另一个，错误记在 loadout_feeds。 */
+/** 每个站各抓各的：一个失败不影响另一个，错误记在 loadout_feeds。 */
 export async function fetchLoadoutFeeds(deps: { fetch?: PageFetch; sleep?: (ms: number) => Promise<void>; now?: () => Date } = {}): Promise<Record<string, unknown>> {
   const fetchPage = deps.fetch ?? defaultFetch;
   const sleep = deps.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));

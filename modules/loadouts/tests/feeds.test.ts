@@ -4,10 +4,11 @@ import path from "node:path";
 import { after, test } from "node:test";
 import { closeDb, sql } from "@aihot/backend/db";
 import { matchWeapon } from "../catalog.ts";
-import { decideLoadout } from "../codes.ts";
-import { fetchLoadoutFeeds, gatherYunmaku, type PageFetch } from "../fetch.ts";
-import { SJZGQ_HOME, YUNMAKU_ORIGIN, isPreferredAuthor, yunmakuListUrl } from "../feeds.ts";
+import { decideLoadout, formatApplyCount } from "../codes.ts";
+import { fetchLoadoutFeeds, gatherYunmaku, gatherYufan, type PageFetch } from "../fetch.ts";
+import { SJZGQ_HOME, YUFAN_API_ORIGIN, YUFAN_ORIGIN, YUFAN_PAGE, YUFAN_ROW_CAP, YUNMAKU_ORIGIN, isPreferredAuthor, yufanAnonKey, yufanApiHeaders, yufanCodesUrl, yunmakuListUrl } from "../feeds.ts";
 import { parseSjzgqCatalog, parseSjzgqHtml, sjzgqScriptUrl } from "../parse-sjzgq.ts";
+import { parseYufan } from "../parse-yufan.ts";
 import { parseYunmaku } from "../parse-yunmaku.ts";
 import { robotsAllows } from "../robots.ts";
 import { listLoadouts, recordFeedFailure, saveFeedLoadout, syncArticleLoadouts } from "../store.ts";
@@ -183,6 +184,7 @@ test("the same code stays with the first feed, streamers sort first, and an arti
     author: "昊天（三角洲行动）",
     sourceUrl: "https://www.sjzgq.cn/",
     postedOn: "2026-09-11",
+    popularity: null,
   };
   assert.equal(await saveFeedLoadout(sql, "sjzgq", base, at), "inserted");
   assert.equal(await saveFeedLoadout(sql, "yunmaku", { ...base, author: "路人", sourceUrl: "https://www.yunmaku.com/loadouts" }, at), "kept");
@@ -196,6 +198,7 @@ test("the same code stays with the first feed, streamers sort first, and an arti
     author: "路人",
     sourceUrl: "https://www.yunmaku.com/loadouts",
     postedOn: "2026-10-01",
+    popularity: null,
   }, at);
   await saveFeedLoadout(sql, "yunmaku", {
     categoryKey: "rifle",
@@ -206,6 +209,7 @@ test("the same code stays with the first feed, streamers sort first, and an arti
     author: "昊天",
     sourceUrl: "https://www.yunmaku.com/loadouts",
     postedOn: "2026-08-01",
+    popularity: null,
   }, at);
 
   const listed = await listLoadouts(sql);
@@ -244,14 +248,219 @@ test("the same code stays with the first feed, streamers sort first, and an arti
   assert.equal(failing?.fail_count, 5);
 });
 
-test("a fetch stores both feeds and records a robots block without dropping the other", async () => {
+test("the yufan anon key is the public client default unless overridden", () => {
+  const key = yufanAnonKey({});
+  const payload = JSON.parse(Buffer.from(key.split(".")[1]!, "base64url").toString("utf8")) as { role?: string; ref?: string };
+  assert.equal(payload.role, "anon");
+  assert.equal(payload.ref, "iugcmnqglxrcmdodugqk");
+  assert.equal(yufanAnonKey({ YUFAN_SUPABASE_ANON_KEY: "  " }), key);
+  assert.equal(yufanAnonKey({ YUFAN_SUPABASE_ANON_KEY: "replaced" }), "replaced");
+  assert.equal(yufanApiHeaders({ YUFAN_SUPABASE_ANON_KEY: "replaced" }).Authorization, "Bearer replaced");
+  assert.equal(formatApplyCount(863888), "应用 86.4万");
+  assert.equal(formatApplyCount(50), "应用 50");
+  assert.equal(formatApplyCount(null), null);
+});
+
+test("yufan official rows map the code, gun, author, price, popularity and Beijing sync date", () => {
+  const parsed = parseYufan(fixture("yufan.json"), YUFAN_PAGE);
+  assert.equal(parsed.rows, 12);
+  const codes = parsed.raws.map((item) => item.code);
+  assert.equal(codes.includes("Vector冲锋枪-全面战场-6HIDDENOFFICIAL1234"), false);
+  assert.equal(codes.includes("AKM突击步枪-烽火地带-6CUSTOMSOURCE123456"), false);
+  const byCode = new Map(parsed.raws.map((item) => [item.code.replace(/\s+/g, ""), item]));
+  const hot = byCode.get("M250通用机枪-烽火地带-6LHR6VK04AP30SQDG0N2R");
+  assert.equal(hot?.author, "鼠哈哈");
+  assert.equal(hot?.priceText, "60.8万");
+  assert.equal(hot?.popularity, 863888);
+  assert.equal(hot?.postedOn, "2026-10-29");
+  assert.equal(hot?.sourceUrl, YUFAN_PAGE);
+  assert.equal(hot?.weaponHint, "M250通用机枪");
+  const fallback = byCode.get("冲锋枪-烽火地带-6P90FALLBACK1234567");
+  assert.equal(fallback?.weaponHint, "P90冲锋枪");
+  const spaced = parsed.raws.find((item) => item.code.includes("6LEADSPACE123456789"));
+  assert.equal(spaced?.author, "天霸Mad98");
+  assert.equal(spaced?.priceText, null);
+  assert.equal(spaced?.postedOn, "2026-10-29");
+  const edge = byCode.get("M16A4突击步枪-烽火地带-6SEASONEDGE1234567");
+  assert.equal(edge?.postedOn, "2026-09-04");
+  const undated = byCode.get("G18-烽火地带-6NODATECODE12345678");
+  assert.equal(undated?.postedOn, null);
+  assert.equal(undated?.popularity, null);
+  const decisions = parsed.raws.map((item) => decideLoadout(item));
+  const accepted = decisions.filter((item) => item.ok);
+  assert.equal(accepted.length, 7);
+  const p90 = accepted.find((item) => item.ok && item.row.code.includes("6P90FALLBACK1234567"));
+  assert.equal(p90 && p90.ok ? p90.row.weapon : "", "P90冲锋枪");
+  assert.equal(decisions.filter((item) => !item.ok && item.reason === "stale").length, 1);
+  assert.equal(decisions.filter((item) => !item.ok && item.reason === "shape").length, 1);
+  assert.equal(decisions.filter((item) => !item.ok && item.reason === "unmapped").length, 1);
+  assert.throws(() => parseYufan("{}", YUFAN_PAGE), /不是列表/);
+  assert.throws(() => parseYufan("nope", YUFAN_PAGE), /不是 JSON/);
+});
+
+test("yufan reads both robots files, then requests the table with the anon key", async () => {
+  const seen: Array<{ url: string; headers?: Record<string, string> }> = [];
+  const body = fixture("yufan.json");
+  const api = yufanCodesUrl();
+  const fetchPage: PageFetch = async (url, init) => {
+    seen.push({ url, headers: init?.headers });
+    if (url === new URL("/robots.txt", YUFAN_ORIGIN).toString()) return { status: 200, text: () => "User-agent: *\nAllow: /\n" };
+    if (url === new URL("/robots.txt", YUFAN_API_ORIGIN).toString()) return { status: 404, text: () => "{\"error\":\"requested path is invalid\"}" };
+    if (url === api) return { status: 200, text: () => body };
+    throw new Error(`unexpected ${url}`);
+  };
+  const gathered = await gatherYufan(fetchPage, async () => {});
+  assert.deepEqual(seen.map((item) => item.url), [
+    new URL("/robots.txt", YUFAN_ORIGIN).toString(),
+    new URL("/robots.txt", YUFAN_API_ORIGIN).toString(),
+    api,
+  ]);
+  assert.deepEqual(seen[2]?.headers, yufanApiHeaders());
+  assert.equal(api.includes("source=eq.official"), true);
+  assert.equal(api.includes("is_hidden=eq.false"), true);
+  assert.equal(gathered.byMode["烽火地带"], 6);
+  assert.equal(gathered.byMode["黑潮爆破"], 1);
+  assert.deepEqual(gathered.unmapped, ["没这把枪"]);
+  assert.equal(gathered.stale.length, 1);
+  assert.equal(gathered.warning, null);
+  assert.equal(gathered.rows.find((row) => row.code.startsWith("M250"))?.popularity, 863888);
+});
+
+test("yufan stops before the api when robots disallow it", async () => {
+  const seen: string[] = [];
+  const blockedSite: PageFetch = async (url) => {
+    seen.push(url);
+    return { status: 200, text: () => "User-agent: *\nDisallow: /\n" };
+  };
+  await assert.rejects(() => gatherYufan(blockedSite, async () => {}), /robots\.txt 不允许抓取有力气$/);
+  assert.deepEqual(seen, [new URL("/robots.txt", YUFAN_ORIGIN).toString()]);
+
+  const apiSeen: string[] = [];
+  const blockedApi: PageFetch = async (url) => {
+    apiSeen.push(url);
+    if (url.startsWith(YUFAN_ORIGIN)) return { status: 200, text: () => "User-agent: *\nAllow: /\n" };
+    return { status: 200, text: () => "User-agent: *\nDisallow: /rest/\n" };
+  };
+  await assert.rejects(() => gatherYufan(blockedApi, async () => {}), /改枪码接口/);
+  assert.equal(apiSeen.includes(yufanCodesUrl()), false);
+});
+
+test("yufan warns when the official list fills the request cap", async () => {
+  const rows = Array.from({ length: YUFAN_ROW_CAP }, (_, i) => ({
+    source: "official",
+    is_hidden: false,
+    solution_code: `M250通用机枪-烽火地带-${i.toString(36).toUpperCase().padStart(12, "0")}`,
+    arms_name: "M250通用机枪",
+    author_nickname: "甲",
+    price: 10000,
+    apply_num: YUFAN_ROW_CAP - i,
+    synced_at: "2026-10-29T00:30:00.000Z",
+  }));
+  const fetchPage: PageFetch = async (url) => {
+    if (url.endsWith("/robots.txt") && url.startsWith(YUFAN_ORIGIN)) return { status: 200, text: () => "User-agent: *\nAllow: /\n" };
+    if (url.endsWith("/robots.txt")) return { status: 404, text: () => "" };
+    return { status: 200, text: () => JSON.stringify(rows) };
+  };
+  const gathered = await gatherYufan(fetchPage, async () => {});
+  assert.match(gathered.warning ?? "", /1000/);
+  assert.equal(gathered.rows.length, YUFAN_ROW_CAP);
+  assert.equal(gathered.rows[0]?.popularity, YUFAN_ROW_CAP);
+});
+
+test("official hot codes sort ahead of streamers, and a repeated code stays with the first feed", async () => {
+  await sql`DELETE FROM loadout_codes`;
+  const at = new Date("2026-10-29T02:00:00+08:00");
+  const official = {
+    categoryKey: "lmg",
+    weapon: "M250通用机枪",
+    code: "M250通用机枪-烽火地带-6LHR6VK04AP30SQDG0N2R",
+    mode: "烽火地带",
+    priceText: "60.8万",
+    author: "鼠哈哈",
+    sourceUrl: YUFAN_PAGE,
+    postedOn: "2026-10-29",
+    popularity: 100,
+  };
+  assert.equal(await saveFeedLoadout(sql, "yufan", official, at), "inserted");
+  assert.equal(await saveFeedLoadout(sql, "yufan", { ...official, popularity: 863888, priceText: "61万" }, at), "updated");
+  assert.equal(await saveFeedLoadout(sql, "yunmaku", { ...official, author: "路人", popularity: 1, sourceUrl: "https://www.yunmaku.com/loadouts" }, at), "kept");
+  await saveFeedLoadout(sql, "yufan", {
+    ...official,
+    code: "M250通用机枪-烽火地带-6HOTTEROLDER12345678",
+    popularity: 50,
+    author: "路人",
+    postedOn: "2026-09-10",
+  }, at);
+  await saveFeedLoadout(sql, "sjzgq", {
+    ...official,
+    code: "M250通用机枪-烽火地带-6STREAMERCODE123456",
+    author: "昊天",
+    popularity: null,
+    priceText: null,
+    sourceUrl: "https://www.sjzgq.cn/",
+    postedOn: "2026-10-20",
+  }, at);
+  await saveFeedLoadout(sql, "yunmaku", {
+    ...official,
+    code: "M250通用机枪-烽火地带-6PLAINNEWER12345678",
+    author: "路人",
+    popularity: null,
+    sourceUrl: "https://www.yunmaku.com/loadouts",
+    postedOn: "2026-10-28",
+  }, at);
+  const owned = "M250通用机枪-烽火地带-6OWNEDBYYUN12345678";
+  assert.equal(await saveFeedLoadout(sql, "yunmaku", {
+    ...official,
+    code: owned,
+    author: "路人",
+    popularity: null,
+    sourceUrl: "https://www.yunmaku.com/loadouts",
+    postedOn: "2026-10-01",
+  }, at), "inserted");
+  assert.equal(await saveFeedLoadout(sql, "yufan", { ...official, code: owned, author: "官方作者", popularity: 99999 }, at), "kept");
+  await saveFeedLoadout(sql, "yufan", {
+    ...official,
+    code: "M250通用机枪-烽火地带-6STALEHOTCODE123456",
+    popularity: 20000,
+    postedOn: "2026-08-01",
+  }, at);
+
+  const listed = await listLoadouts(sql);
+  const codes = listed.categories.find((category) => category.key === "lmg")!.weapons.find((weapon) => weapon.name === "M250通用机枪")!.codes;
+  assert.deepEqual(codes.map((item) => item.code), [
+    official.code,
+    "M250通用机枪-烽火地带-6HOTTEROLDER12345678",
+    "M250通用机枪-烽火地带-6STREAMERCODE123456",
+    "M250通用机枪-烽火地带-6PLAINNEWER12345678",
+    owned,
+    "M250通用机枪-烽火地带-6STALEHOTCODE123456",
+  ]);
+  assert.equal(codes[0]?.source, "有力气·官方热门");
+  assert.equal(codes[0]?.author, "鼠哈哈");
+  assert.equal(codes[0]?.priceText, "61万");
+  assert.equal(codes[0]?.popularityText, "应用 86.4万");
+  assert.equal(codes[0]?.featured, false);
+  assert.equal(codes[1]?.popularityText, "应用 50");
+  assert.equal(codes[2]?.featured, true);
+  assert.equal(codes[2]?.source, "洲械库");
+  assert.equal(codes[4]?.source, "云码库");
+  assert.equal(codes[4]?.author, "路人");
+  assert.equal(codes[5]?.stale, true);
+  assert.equal(codes[5]?.popularityText, "应用 2万");
+});
+
+test("a fetch stores each feed and records a robots block without dropping the others", async () => {
   await sql`DELETE FROM loadout_codes`;
   await sql`DELETE FROM loadout_feeds`;
   const yunmaku = fixture("yunmaku.html");
   const sjzgq = fixture("sjzgq.html");
   const catalog = fixture("sjzgq-catalog.js");
   const robots = fixture("yunmaku-robots.txt");
+  const yufan = fixture("yufan.json");
   const pages = new Map<string, { status: number; body: string }>([
+    [new URL("/robots.txt", YUFAN_ORIGIN).toString(), { status: 200, body: "User-agent: *\nAllow: /\n" }],
+    [new URL("/robots.txt", YUFAN_API_ORIGIN).toString(), { status: 404, body: "{\"error\":\"requested path is invalid\"}" }],
+    [yufanCodesUrl(), { status: 200, body: yufan }],
     [`${YUNMAKU_ORIGIN}/robots.txt`, { status: 200, body: robots }],
     [`${YUNMAKU_ORIGIN}/`, { status: 200, body: yunmaku }],
     [yunmakuListUrl("fenghuo"), { status: 200, body: yunmaku }],
@@ -269,8 +478,16 @@ test("a fetch stores both feeds and records a robots block without dropping the 
   const summary = await fetchLoadoutFeeds({ fetch: fetchPage, sleep: async () => {}, now: () => new Date("2026-10-28T01:00:00+08:00") });
   const yun = summary.yunmaku as { ok: boolean; byMode: Record<string, number>; unmapped: string[] };
   const sj = summary.sjzgq as { ok: boolean; byMode: Record<string, number>; unmapped: string[] };
+  const yufanSummary = summary.yufan as { ok: boolean; inserted: number; byMode: Record<string, number>; unmapped: string[]; stale: number; warning: string | null };
   assert.equal(yun.ok, true);
   assert.equal(sj.ok, true);
+  assert.equal(yufanSummary.ok, true);
+  assert.equal(yufanSummary.inserted, 7);
+  assert.equal(yufanSummary.stale, 1);
+  assert.equal(yufanSummary.byMode["烽火地带"], 6);
+  assert.equal(yufanSummary.byMode["黑潮爆破"], 1);
+  assert.deepEqual(yufanSummary.unmapped, ["没这把枪"]);
+  assert.equal(yufanSummary.warning, null);
   assert.equal(yun.byMode["烽火地带"], 1);
   assert.equal(yun.byMode["全面战场"], 1);
   assert.deepEqual(yun.unmapped, ["没这把枪"]);
@@ -282,6 +499,8 @@ test("a fetch stores both feeds and records a robots block without dropping the 
   assert.ok(names.includes("K437突击步枪:洲械库:昊天（三角洲行动）"));
   assert.ok(names.includes("Vector冲锋枪:洲械库:林树"));
   assert.ok(names.some((name) => name.startsWith("K416突击步枪:云码库:昊天")));
+  assert.ok(names.includes("M250通用机枪:有力气·官方热门:鼠哈哈"));
+  assert.ok(names.includes("P90冲锋枪:有力气·官方热门:巾凡"));
   const [health] = await sql<{ health: string; last_error: string | null; note: string | null }[]>`SELECT health, last_error, note FROM loadout_feeds WHERE id = 'sjzgq'`;
   assert.equal(health?.health, "ok");
   assert.equal(health?.last_error, null);
@@ -290,7 +509,11 @@ test("a fetch stores both feeds and records a robots block without dropping the 
   pages.set(`${YUNMAKU_ORIGIN}/robots.txt`, { status: 200, body: "User-agent: *\nDisallow: /\n" });
   const blocked = await fetchLoadoutFeeds({ fetch: fetchPage, sleep: async () => {}, now: () => new Date("2026-10-28T02:00:00+08:00") });
   const blockedYun = blocked.yunmaku as { ok: boolean; error?: string };
+  const blockedYufan = blocked.yufan as { ok: boolean };
+  const blockedSj = blocked.sjzgq as { ok: boolean };
   assert.equal(blockedYun.ok, false);
+  assert.equal(blockedYufan.ok, true);
+  assert.equal(blockedSj.ok, true);
   assert.match(blockedYun.error ?? "", /robots\.txt/);
   const [failed] = await sql<{ health: string; fail_count: number }[]>`SELECT health, fail_count FROM loadout_feeds WHERE id = 'yunmaku'`;
   assert.equal(failed?.health, "degraded");
@@ -298,4 +521,8 @@ test("a fetch stores both feeds and records a robots block without dropping the 
   const still = await listLoadouts(sql);
   const vector = still.categories.find((category) => category.key === "smg")!.weapons.find((weapon) => weapon.name === "Vector冲锋枪")!;
   assert.equal(vector.codes[0]?.author, "林树");
+  const m250 = still.categories.find((category) => category.key === "lmg")!.weapons.find((weapon) => weapon.name === "M250通用机枪")!;
+  assert.equal(m250.codes[0]?.source, "有力气·官方热门");
+  assert.equal(m250.codes[0]?.author, "鼠哈哈");
+  assert.equal(m250.codes[0]?.popularityText, "应用 86.4万");
 });
