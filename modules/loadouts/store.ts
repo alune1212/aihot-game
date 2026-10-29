@@ -2,8 +2,8 @@ import type { Db } from "@aihot/backend/db";
 import { beijingDate, beijingMidnight } from "@aihot/contracts/time";
 import { GAME_ID, isWeaponListed, WEAPON_CATEGORIES, type WeaponCategory } from "./catalog.ts";
 import { extractLoadouts } from "./extract.ts";
-import type { FeedRow } from "./codes.ts";
-import { FEED_LABEL, isPreferredAuthor, SEASON_START } from "./feeds.ts";
+import { formatApplyCount, type FeedRow } from "./codes.ts";
+import { FEED_LABEL, isPreferredAuthor, OFFICIAL_FEED_ID, SEASON_START } from "./feeds.ts";
 
 export interface LoadoutCode {
   code: string;
@@ -16,6 +16,8 @@ export interface LoadoutCode {
   notedAt: string | null;
   /** 发布日（北京时间 YYYY-MM-DD）。 */
   postedOn: string | null;
+  /** 应用次数的展示，比如「应用 86.4万」。没有就是 null。 */
+  popularityText: string | null;
   featured: boolean;
   stale: boolean;
 }
@@ -69,9 +71,10 @@ function postedAt(postedOn: string | null): Date | null {
 /** 写入一条聚合站的码。别的站已经收过同一串时保持原样。 */
 export async function saveFeedLoadout(db: Db, source: string, row: FeedRow, fetchedAt: Date): Promise<"inserted" | "updated" | "kept"> {
   const noted = postedAt(row.postedOn);
+  const popularity = row.popularity ?? null;
   const inserted = await db<{ id: number }[]>`INSERT INTO loadout_codes
-    (game_id, category_key, weapon, code, mode, price_text, author, source, source_url, noted_at, fetched_at)
-    VALUES (${GAME_ID}, ${row.categoryKey}, ${row.weapon}, ${row.code}, ${row.mode}, ${row.priceText}, ${row.author}, ${source}, ${row.sourceUrl}, ${noted}, ${fetchedAt})
+    (game_id, category_key, weapon, code, mode, price_text, author, popularity, source, source_url, noted_at, fetched_at)
+    VALUES (${GAME_ID}, ${row.categoryKey}, ${row.weapon}, ${row.code}, ${row.mode}, ${row.priceText}, ${row.author}, ${popularity}, ${source}, ${row.sourceUrl}, ${noted}, ${fetchedAt})
     ON CONFLICT (game_id, code) DO NOTHING RETURNING id`;
   if (inserted.length) return "inserted";
   const [existing] = await db<{ id: number; source: string | null }[]>`
@@ -83,6 +86,7 @@ export async function saveFeedLoadout(db: Db, source: string, row: FeedRow, fetc
     mode = ${row.mode},
     price_text = COALESCE(${row.priceText}, price_text),
     author = COALESCE(${row.author}, author),
+    popularity = COALESCE(${popularity}, popularity),
     source = ${source},
     source_url = ${row.sourceUrl},
     noted_at = COALESCE(${noted}, noted_at),
@@ -138,14 +142,17 @@ function isStale(notedAt: Date | null): boolean {
 
 export async function listLoadouts(db: Db, gameId = GAME_ID): Promise<{ gameId: string; categories: LoadoutCategoryView[] }> {
   const catalog: readonly WeaponCategory[] = gameId === GAME_ID ? WEAPON_CATEGORIES : [];
-  const rows = await db<{ id: number; category_key: string; weapon: string; code: string; mode: string | null; price_text: string | null; author: string | null; source: string | null; source_url: string | null; noted_at: Date | null }[]>`
-    SELECT id, category_key, weapon, code, mode, price_text, author, source, source_url, noted_at
+  const rows = await db<{ id: number; category_key: string; weapon: string; code: string; mode: string | null; price_text: string | null; author: string | null; popularity: number | null; source: string | null; source_url: string | null; noted_at: Date | null }[]>`
+    SELECT id, category_key, weapon, code, mode, price_text, author, popularity, source, source_url, noted_at
     FROM loadout_codes
     WHERE game_id = ${gameId}`;
   const ranked = [...rows].sort((a, b) => {
-    const group = (row: typeof a) => (isStale(row.noted_at) ? 2 : isPreferredAuthor(row.author) ? 0 : 1);
+    // 过季最后。官方热门靠前，然后是主播，再是其他方案。
+    const group = (row: typeof a) => (isStale(row.noted_at) ? 3 : row.source === OFFICIAL_FEED_ID ? 0 : isPreferredAuthor(row.author) ? 1 : 2);
     const byGroup = group(a) - group(b);
     if (byGroup) return byGroup;
+    const byPop = (b.popularity ?? -1) - (a.popularity ?? -1);
+    if (byPop) return byPop;
     const aTime = a.noted_at ? -a.noted_at.getTime() : Number.POSITIVE_INFINITY;
     const bTime = b.noted_at ? -b.noted_at.getTime() : Number.POSITIVE_INFINITY;
     if (aTime !== bTime) return aTime - bTime;
@@ -165,6 +172,7 @@ export async function listLoadouts(db: Db, gameId = GAME_ID): Promise<{ gameId: 
       sourceUrl: row.source_url,
       notedAt: row.noted_at ? row.noted_at.toISOString() : null,
       postedOn,
+      popularityText: formatApplyCount(row.popularity),
       featured: isPreferredAuthor(row.author) && !isStale(row.noted_at),
       stale: isStale(row.noted_at),
     });
