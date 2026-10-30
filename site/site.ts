@@ -286,8 +286,9 @@ export const DEPLOYMENT = {
   /**
    * 已实测应由服务器直接连接、不走出网代理（EGRESS_PROXY_URL）的域名，采集和图片共用（选填）。
    * 每次重定向重新按目标域名选路，直连仍检查实际连接地址。
+   * comm.ams.game.qq.com 是腾讯国内接口。出网代理只自动放行 .cn，不写在这里就会被送去代理。
    */
-  directFetchHosts: [] as string[],
+  directFetchHosts: ["comm.ams.game.qq.com"],
   /**
    * 精选评测（scripts/eval-selection.ts）不带参数时用的金标集：文件（相对仓库根目录）、抽样条数、只抽哪一份、门槛扫描范围。
    * null 就用 .data/gold.jsonl 的全部样本（最多 200 条），在 40–90 之间扫描。

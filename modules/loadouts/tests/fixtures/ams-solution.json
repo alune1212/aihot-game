@@ -1,0 +1,69 @@
+{
+  "ret": 0,
+  "iRet": 0,
+  "sMsg": "succ",
+  "jData": {
+    "data": {
+      "code": 0,
+      "data": {
+        "page": 1,
+        "limit": 20,
+        "totalCount": 1,
+        "list": [
+          {
+            "id": 90001,
+            "name": "测试全面改",
+            "solutionCode": "K416突击步枪-烽火地带-6FIXTURECODE12345",
+            "previewPic": "https://playerhub.df.qq.com/playerhub/60004/object/18010000001.png",
+            "armsDetail": {
+              "objectID": 18010000001,
+              "objectName": "K416突击步枪",
+              "grade": 0,
+              "pic": "https://playerhub.df.qq.com/playerhub/60004/object/18010000001.png",
+              "avgPrice": 90000,
+              "gunDetail": {
+                "meatHarm": 31,
+                "shootDistance": 27,
+                "recoil": 44,
+                "control": 61,
+                "stable": 52,
+                "hipShot": 57,
+                "armorHarm": 35,
+                "fireSpeed": 880,
+                "fireMode": "全自动/单发",
+                "muzzleVelocity": 575,
+                "capacity": 30
+              }
+            },
+            "propertiesDetail": {
+              "origin": { "meatHarm": 31, "shootDistance": 27, "recoil": 44, "control": 61, "stable": 52, "hipShot": 57, "armorHarm": 35, "fireSpeed": 880 },
+              "change": { "meatHarm": 0, "shootDistance": 8, "recoil": 6, "control": -3, "stable": 4, "hipShot": -2, "armorHarm": 0, "fireSpeed": 0 }
+            },
+            "accessoryDetail": [
+              { "slotID": "6", "objectID": 13130000164 },
+              { "slotID": "31" }
+            ],
+            "accObjectEffect": [
+              {
+                "objectID": 13130000164,
+                "list": [
+                  { "effectList": [{ "value": "后坐力控制+6", "batteryValue": 2, "batteryColor": "green" }] },
+                  { "effectList": [{ "value": "操控速度-3", "batteryValue": -2, "batteryColor": "red" }] }
+                ]
+              }
+            ]
+          }
+        ],
+        "relateMap": {
+          "13130000164": {
+            "objectID": 13130000164,
+            "objectName": "测试消音器",
+            "grade": 4,
+            "pic": "https://playerhub.df.qq.com/playerhub/60004/object/13130000164.png",
+            "avgPrice": 12000
+          }
+        }
+      }
+    }
+  }
+}
