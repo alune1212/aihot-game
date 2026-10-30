@@ -6,6 +6,7 @@ import { formatApplyCount, type FeedRow } from "./codes.ts";
 import { FEED_LABEL, isPreferredAuthor, OFFICIAL_FEED_ID, SEASON_START } from "./feeds.ts";
 
 export interface LoadoutCode {
+  id: number;
   code: string;
   mode: string | null;
   priceText: string | null;
@@ -20,6 +21,8 @@ export interface LoadoutCode {
   popularityText: string | null;
   featured: boolean;
   stale: boolean;
+  /** 枪身加配件的最新总价。还没齐的时候是 null，不用方案上的旧标价。 */
+  totalText: string | null;
 }
 
 export interface LoadoutWeapon {
@@ -164,6 +167,7 @@ export async function listLoadouts(db: Db, gameId = GAME_ID): Promise<{ gameId: 
     if (list.length >= PER_WEAPON) continue;
     const postedOn = row.noted_at ? beijingDate(row.noted_at) : null;
     list.push({
+      id: row.id,
       code: row.code,
       mode: row.mode,
       priceText: row.price_text,
@@ -175,6 +179,7 @@ export async function listLoadouts(db: Db, gameId = GAME_ID): Promise<{ gameId: 
       popularityText: formatApplyCount(row.popularity),
       featured: isPreferredAuthor(row.author) && !isStale(row.noted_at),
       stale: isStale(row.noted_at),
+      totalText: null,
     });
     byWeapon.set(row.weapon, list);
   }

@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { useLoaderData } from "react-router";
-import { SITE } from "@aihot/site";
 import { apiGet } from "@aihot/web/lib/api.server";
 import { copyText } from "@aihot/web/lib/clipboard";
 import { pageMeta } from "@aihot/web/lib/seo";
@@ -10,6 +9,7 @@ import type { Screen } from "@aihot/web/components/shell/screens";
 export const handle: Screen = { tab: "loadouts", name: "改枪" };
 
 interface LoadoutCode {
+  id: number;
   code: string;
   mode: string | null;
   priceText: string | null;
@@ -20,6 +20,7 @@ interface LoadoutCode {
   popularityText: string | null;
   featured: boolean;
   stale: boolean;
+  totalText: string | null;
 }
 
 interface Payload {
@@ -36,10 +37,10 @@ export async function loader({ request }: { request: Request }) {
   return { ...data, category: known ? category : null };
 }
 
-export function meta({ data }: { data?: Payload }) {
-  const name = data?.game.name ?? "三角洲行动";
+export function meta({ loaderData }: { loaderData?: Payload }) {
+  const name = loaderData?.game.name ?? "三角洲行动";
   return pageMeta({
-    title: `${name}改枪码 · ${SITE.name}`,
+    title: `${name}改枪码`,
     description: `按${name}的枪种和枪名查看改枪码，带来源和作者。导入前请回游戏里核对。`,
     path: "/loadouts",
   });
@@ -108,10 +109,12 @@ export default function LoadoutsPage() {
                           <div className="min-w-0">
                             <p className={`break-all font-mono text-[13px] ${code.stale ? "text-ink-4" : "text-ink"}`}>{code.code}</p>
                             <p className="mt-0.5 text-[12px] text-ink-4">
-                              {[code.mode, code.priceText, code.popularityText, code.author, code.source, code.postedOn].filter(Boolean).join(" · ") || "未注明模式"}
+                              {[code.mode, code.totalText ? `整枪 ${code.totalText}` : code.priceText, code.popularityText, code.author, code.source, code.postedOn].filter(Boolean).join(" · ") || "未注明模式"}
                               {code.featured ? " · 主播" : ""}
                               {code.stale ? " · 过季" : ""}
                               {code.sourceUrl ? <> · <a href={code.sourceUrl} className="text-accent hover:underline">来源</a></> : null}
+                              {" · "}
+                              <a href={`/loadouts/${code.id}`} className="text-accent hover:underline">配件和属性</a>
                             </p>
                           </div>
                           <CopyCode code={code.code} />
