@@ -51,3 +51,12 @@
 - **测试守行为，不守写法。** 复现问题的测试并进这个功能已有的测试文件，不为一次修复新开文件；不断言私有常量、CSS 类名、像素位置或浏览器自己的行为，不把重构前的输出钉成永久测试。合并前会按这个标准删减测试。
 - **这几类文件不收外部 PR 的修改：** 依赖与锁文件（版本升级由 dependabot 提）、`AGENTS.md`、`CLAUDE.md`、`CONTRIBUTING.md`、`SECURITY.md` 和 `.agents/`、`.claude/` 下的规则、二进制文件（测试要的样本请用代码生成）。需要改的先开 Issue 说明，由维护者来改：规则文件决定之后的 Agent 怎么做事，依赖和二进制没法逐行审。
 - **改全。** 新的环境变量写进 `.env.example`，新的站点配置写进 `site/`；改了配置字段的意思，示例配置跟着改，让已部署的站升级后行为不变（比如改成只给声明了 `vision` 的模型附图，本来就能看图的预设要补上声明）；改一个读者看到的名字或入口，出现它的地方一起改。新增或更改导航配置时，分别核对默认配置与非默认配置的电脑侧栏、手机底栏、返回和“我的”入口，入口变少时的标签布局也要在浏览器里看；默认值不变只能证明原行为，不能证明配置可用。
+
+## Cursor Cloud specific instructions
+
+- Node.js 24.22.1 装在 `/usr/local/bin/node`。登录 shell 会把它放到 `PATH` 前面。如果 `node -v` 仍低于 24，先执行 `export PATH="/usr/local/bin:$PATH"`。
+- PostgreSQL 17 监听 `127.0.0.1:5432`。操作系统用户 `ubuntu` 免密连接。应用库是 `aihot`。测试用 `DATABASE_URL=postgres://127.0.0.1:5432/aihot_test`（名字必须以 `_test` 或 `_ci` 结尾）。
+- 启动脚本在没有 `.env` 时生成一份：`COLLECT_ENABLED` 和 `MODEL_CALLS_ENABLED` 保持关闭，并设置 `DEV_AUTH_ROLE=admin`。没有 `LLM_API_KEY` 时不要打开采集和模型调用。
+- 开发进程在 tmux 会话 `aihot-api`（3001）、`aihot-worker`、`aihot-web`（3000）。网页开发服务器把 `/api` 转到 3001。
+- `npm test` 里访问页面的测试依赖 `apps/web/build`（安装时会构建）以及 Playwright 的 Chromium 和 WebKit。
+- 开发免登录打开时，`/admin/login` 会跳到 `/admin`，`/admin` 再跳到 `/admin/sources`。`scripts/smoke.ts` 期望登录页返回 200，那是没有开发免登录时的结果。
