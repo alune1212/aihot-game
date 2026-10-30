@@ -141,6 +141,11 @@
   --code-variable: #a13d10;
   --code-meta: #b42348;
   --selection: rgba(23, 107, 117, 0.16);
+  /* Gun and part sprites sit on this well. Light stays pale so black parts stay visible. */
+  --gun-well-center: var(--surface);
+  --gun-well-edge: var(--bg-muted);
+  --gun-grade-mix: 14%;
+  --gun-sprite-filter: contrast(1.06) drop-shadow(0 1px 1.5px color-mix(in oklab, var(--ink) 40%, transparent));
 }
 
 @media (min-width: 961px) {
@@ -199,6 +204,18 @@
   --code-variable: #fc9867;
   --code-meta: #ff6188;
   --selection: rgba(18, 204, 216, 0.22);
+  /* Mid cool slate, centre brighter than the edge. A light halo outlines black parts; no dark shadow on the sprite. */
+  --gun-well-center: color-mix(in oklab, var(--ink) 58%, var(--bg-muted));
+  --gun-well-edge: color-mix(in oklab, var(--ink) 26%, var(--bg-muted));
+  --gun-grade-mix: 12%;
+  --gun-sprite-filter: brightness(1.1) contrast(1.18) drop-shadow(0 0 0.8px color-mix(in oklab, var(--ink) 95%, transparent)) drop-shadow(0 0 3px color-mix(in oklab, var(--ink) 42%, transparent));
+}
+
+.gun-well {
+  background: radial-gradient(ellipse at center, color-mix(in oklab, var(--grade, var(--ink-4)) var(--gun-grade-mix), var(--gun-well-center)) 0%, var(--gun-well-edge) 74%);
+}
+.gun-sprite {
+  filter: var(--gun-sprite-filter);
 }
 
 @layer base {
