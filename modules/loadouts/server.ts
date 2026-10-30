@@ -67,9 +67,9 @@ export default defineServerModule({
         key: `loadouts.${row.id}`,
         level: "today" as const,
         title: ams ? `${row.name}暂时不可用` : `${row.name}的改枪码抓取失败`,
-        impact: ams ? "改枪码详情会改用有力气的配件和价格，可能没有改装前后的属性差" : "改枪码页会少掉这个站上的新方案",
-        heals: ams ? "换一份有效的 QQ 登录态，或等官方接口恢复后，下一次任务会自己好" : "站点恢复后，下一次定时抓取会自己好",
-        action: ams ? "看任务 loadouts.detail 或 loadouts.prices 的错误，并核对 DF_QQ_COOKIE" : "看任务 loadouts.fetch 的错误",
+        impact: ams ? "已缓存的官方详情和价格继续显示，还没缓存过的码显示暂无官方详情" : "改枪码页会少掉这个站上的新方案",
+        heals: ams ? "官方接口恢复后，下一次任务会自己好" : "站点恢复后，下一次定时抓取会自己好",
+        action: ams ? "看任务 loadouts.detail 或 loadouts.prices 的错误" : "看任务 loadouts.fetch 的错误",
         detail: row.last_error ?? "",
         since: row.last_fetch_at ?? undefined,
       };
