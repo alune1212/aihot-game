@@ -94,6 +94,8 @@ test("sync keeps the official cache, leaves unknown codes empty, and a failed lo
   assert.equal(amsCalls, 1);
   const [k416] = await sql<{ id: number }[]>`SELECT id FROM loadout_codes WHERE code = ${CODE}`;
   const detail = await loadoutDetail(sql, k416!.id);
+  assert.equal(detail?.code.source, "官方热门");
+  assert.equal(detail?.code.sourceUrl, null);
   assert.equal(detail?.detail?.source, "ams");
   assert.equal(detail?.detail?.properties?.change?.recoil, 6);
   assert.equal(detail?.detail?.slots[0]?.price, 12000);

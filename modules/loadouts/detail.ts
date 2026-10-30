@@ -18,7 +18,7 @@ import {
   type LoadoutPayload,
   type LoadoutSlot,
 } from "./ams.ts";
-import { FEED_LABEL, isPreferredAuthor, SEASON_START } from "./feeds.ts";
+import { isPreferredAuthor, publicFeed, SEASON_START } from "./feeds.ts";
 import { formatApplyCount } from "./codes.ts";
 import { formatGamePrice } from "./parse-yufan.ts";
 import { recordFeedFailure, recordFeedSuccess, type LoadoutCategoryView } from "./store.ts";
@@ -270,8 +270,7 @@ function presentCode(row: StoredCode): PublicLoadoutCode {
     mode: row.mode,
     priceText: row.price_text,
     author: row.author,
-    source: row.source ? FEED_LABEL[row.source] ?? row.source : null,
-    sourceUrl: row.source_url,
+    ...publicFeed(row.source, row.source_url),
     postedOn,
     popularityText: formatApplyCount(row.popularity),
     featured: isPreferredAuthor(row.author) && !stale,

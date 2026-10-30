@@ -3,7 +3,7 @@ import { beijingDate, beijingMidnight } from "@aihot/contracts/time";
 import { GAME_ID, isWeaponListed, WEAPON_CATEGORIES, type WeaponCategory } from "./catalog.ts";
 import { extractLoadouts } from "./extract.ts";
 import { formatApplyCount, type FeedRow } from "./codes.ts";
-import { FEED_LABEL, isPreferredAuthor, OFFICIAL_FEED_ID, SEASON_START } from "./feeds.ts";
+import { isPreferredAuthor, OFFICIAL_FEED_ID, publicFeed, SEASON_START } from "./feeds.ts";
 
 export interface LoadoutCode {
   id: number;
@@ -172,8 +172,7 @@ export async function listLoadouts(db: Db, gameId = GAME_ID): Promise<{ gameId: 
       mode: row.mode,
       priceText: row.price_text,
       author: row.author,
-      source: row.source ? FEED_LABEL[row.source] ?? row.source : null,
-      sourceUrl: row.source_url,
+      ...publicFeed(row.source, row.source_url),
       notedAt: row.noted_at ? row.noted_at.toISOString() : null,
       postedOn,
       popularityText: formatApplyCount(row.popularity),

@@ -435,7 +435,8 @@ test("official hot codes sort ahead of streamers, and a repeated code stays with
     owned,
     "M250通用机枪-烽火地带-6STALEHOTCODE123456",
   ]);
-  assert.equal(codes[0]?.source, "有力气·官方热门");
+  assert.equal(codes[0]?.source, "官方热门");
+  assert.equal(codes[0]?.sourceUrl, null);
   assert.equal(codes[0]?.author, "鼠哈哈");
   assert.equal(codes[0]?.priceText, "61万");
   assert.equal(codes[0]?.popularityText, "应用 86.4万");
@@ -499,8 +500,8 @@ test("a fetch stores each feed and records a robots block without dropping the o
   assert.ok(names.includes("K437突击步枪:洲械库:昊天（三角洲行动）"));
   assert.ok(names.includes("Vector冲锋枪:洲械库:林树"));
   assert.ok(names.some((name) => name.startsWith("K416突击步枪:云码库:昊天")));
-  assert.ok(names.includes("M250通用机枪:有力气·官方热门:鼠哈哈"));
-  assert.ok(names.includes("P90冲锋枪:有力气·官方热门:巾凡"));
+  assert.ok(names.includes("M250通用机枪:官方热门:鼠哈哈"));
+  assert.ok(names.includes("P90冲锋枪:官方热门:巾凡"));
   const [health] = await sql<{ health: string; last_error: string | null; note: string | null }[]>`SELECT health, last_error, note FROM loadout_feeds WHERE id = 'sjzgq'`;
   assert.equal(health?.health, "ok");
   assert.equal(health?.last_error, null);
@@ -522,7 +523,8 @@ test("a fetch stores each feed and records a robots block without dropping the o
   const vector = still.categories.find((category) => category.key === "smg")!.weapons.find((weapon) => weapon.name === "Vector冲锋枪")!;
   assert.equal(vector.codes[0]?.author, "林树");
   const m250 = still.categories.find((category) => category.key === "lmg")!.weapons.find((weapon) => weapon.name === "M250通用机枪")!;
-  assert.equal(m250.codes[0]?.source, "有力气·官方热门");
+  assert.equal(m250.codes[0]?.source, "官方热门");
+  assert.equal(m250.codes[0]?.sourceUrl, null);
   assert.equal(m250.codes[0]?.author, "鼠哈哈");
   assert.equal(m250.codes[0]?.popularityText, "应用 86.4万");
 });
