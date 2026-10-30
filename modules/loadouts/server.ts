@@ -7,7 +7,7 @@ import { fetchLoadoutFeeds } from "./fetch.ts";
 import { SEASON_START } from "./feeds.ts";
 import { listLoadouts, syncArticleLoadouts } from "./store.ts";
 
-const note = `来自有力气的官方热门、云码库、洲械库，以及写明了枪名的文章。早于 ${SEASON_START} 的不新收录，换季后更早的码会标成过季。点进一条可以看配件、最新价格和属性。价格以游戏内交易行为准。导入前请回游戏里核对。`;
+const note = `来自官方热门、云码库、洲械库，以及写明了枪名的文章。早于 ${SEASON_START} 的不新收录，换季后更早的码会标成过季。点进一条可以看配件、最新价格和属性。价格以游戏内交易行为准。导入前请回游戏里核对。`;
 
 export default defineServerModule({
   name: "loadouts",
@@ -91,7 +91,7 @@ export default defineServerModule({
   llms: () => ({
     pages: [`- [改枪码](/loadouts): 按《${GAME_NAME}》的枪种和枪名浏览改枪码。点进一条可以看到配件、最新价格和改装前后的属性`],
     api: [
-      "- GET /api/loadouts — 改枪码，按枪种和枪名分组，带作者、来源和整枪总价（价格齐了才有）",
+      "- GET /api/loadouts — 改枪码，按枪种和枪名分组，带官方枪图、品质、作者、来源和整枪总价（价格齐了才有）",
       "- GET /api/loadouts/:id — 一条改枪码的配件、单价、总价和属性",
     ],
   }),

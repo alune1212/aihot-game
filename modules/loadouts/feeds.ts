@@ -63,8 +63,15 @@ export const YUNMAKU_MODES = ["fenghuo", "battlefield", "heichao"] as const;
 export const FEED_LABEL: Record<string, string> = {
   yunmaku: "云码库",
   sjzgq: "洲械库",
-  [OFFICIAL_FEED_ID]: "有力气·官方热门",
+  [OFFICIAL_FEED_ID]: "官方热门",
 };
+
+/** 读者看到的来源。官方热门不链到采集站；库里的旧链接在这里丢掉。 */
+export function publicFeed(source: string | null, sourceUrl: string | null): { source: string | null; sourceUrl: string | null } {
+  if (!source) return { source: null, sourceUrl };
+  if (source === OFFICIAL_FEED_ID) return { source: FEED_LABEL[source]!, sourceUrl: null };
+  return { source: FEED_LABEL[source] ?? source, sourceUrl };
+}
 
 /** 同一把枪的列表里，主播方案靠前。 */
 export function isPreferredAuthor(author: string | null | undefined): boolean {
