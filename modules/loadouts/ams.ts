@@ -3,7 +3,6 @@
 // 旧文里的 316969 / NoOapI 不带有效登录会返回 ret 101。352143 目前匿名也能读到方案和交易行均价。
 // 登录失效看 ret 101（未登录）和 ret 107（登录态无效）。这两种都不重试，改走公开表。
 import { slotName } from "./slots.ts";
-import { weaponBase, type GunBase } from "./weapon-base.ts";
 
 export const AMS_URL = "https://comm.ams.game.qq.com/ide/";
 export const AMS_CHART = "352143";
@@ -47,7 +46,7 @@ export interface LoadoutProperties {
   capacity: number | null;
 }
 
-export type DetailSource = "ams" | "yufan" | "base";
+export type DetailSource = "ams";
 
 export interface LoadoutPayload {
   source: DetailSource;
@@ -176,25 +175,6 @@ function propertiesOf(item: Record<string, unknown>, gunDetail: Record<string, u
   };
 }
 
-function baseProperties(base: GunBase): LoadoutProperties {
-  return {
-    origin: {
-      meatHarm: base.meatHarm,
-      shootDistance: base.shootDistance,
-      recoil: base.recoil,
-      control: base.control,
-      stable: base.stable,
-      hipShot: base.hipShot,
-      armorHarm: base.armorHarm,
-      fireSpeed: base.fireSpeed,
-    },
-    change: null,
-    fireMode: base.fireMode,
-    muzzleVelocity: base.muzzleVelocity,
-    capacity: base.capacity,
-  };
-}
-
 /** 从浏览器复制的 cookie 里只取登录要用的四项。缺 openid 或 access_token 就当没配。 */
 export function qqCookie(env: { DF_QQ_COOKIE?: string } = process.env): { header: string; secrets: string[] } | null {
   const raw = env.DF_QQ_COOKIE?.trim();
@@ -219,7 +199,7 @@ export function qqCookie(env: { DF_QQ_COOKIE?: string } = process.env): { header
 
 /** 日志和健康状态里不能出现登录态。已知的密钥值整段换成 ***。 */
 export function redactSecrets(value: string, secrets: readonly string[] = []): string {
-  let out = value.replace(/(openid|access_token|appid)=([^;\s&]+)/gi, "$1=***");
+  let out = value.replace(/(openid|access_token|appid)=(?!\*\*\*)([^;\s&]+)/gi, "$1=***");
   for (const secret of secrets) {
     if (secret.length >= 6) out = out.split(secret).join("***");
   }
@@ -324,120 +304,6 @@ function payloadFromSolution(item: Record<string, unknown>, relate: Record<strin
     slots,
     prices,
   };
-}
-
-export interface FallbackPart {
-  slotId: string;
-  objectId: number;
-}
-
-export interface FallbackItem {
-  objectId: number;
-  name: string | null;
-  pic: string | null;
-  grade: number | null;
-  price: number | null;
-}
-
-/** 有力气公开表只有槽位和物品，没有改装差。属性用枪名对上的基础表，对不上就空着。 */
-export function payloadFromFallback(input: {
-  source: "yufan" | "base";
-  weapon: string;
-  name: string | null;
-  previewPic: string | null;
-  gun: FallbackItem | null;
-  parts: FallbackPart[];
-  items: ReadonlyMap<number, FallbackItem>;
-}): LoadoutPayload {
-  const base = weaponBase(input.weapon);
-  const prices: LoadoutPayload["prices"] = [];
-  const slots: LoadoutSlot[] = input.parts.map((part) => {
-    const item = input.items.get(part.objectId);
-    if (item?.price) prices.push({ objectId: part.objectId, price: item.price });
-    return {
-      slotId: part.slotId,
-      slotName: slotName(part.slotId),
-      objectId: part.objectId,
-      name: item?.name ?? null,
-      pic: item?.pic ?? null,
-      grade: item?.grade ?? null,
-      effects: [],
-    };
-  });
-  if (input.gun?.objectId && input.gun.price) prices.push({ objectId: input.gun.objectId, price: input.gun.price });
-  return {
-    source: input.source,
-    name: input.name,
-    previewPic: safePic(input.previewPic),
-    gun: {
-      objectId: input.gun?.objectId ?? null,
-      name: input.gun?.name ?? input.weapon,
-      pic: input.gun?.pic ?? null,
-      grade: input.gun?.grade ?? null,
-    },
-    properties: base ? baseProperties(base) : null,
-    slots,
-    prices,
-  };
-}
-
-export function parseYufanCodes(body: string): Array<{ code: string; name: string | null; previewPic: string | null; gun: FallbackItem | null; parts: FallbackPart[] }> {
-  let data: unknown;
-  try {
-    data = JSON.parse(body);
-  } catch {
-    throw new Error("有力气方案接口不是 JSON");
-  }
-  if (!Array.isArray(data)) throw new Error("有力气方案接口不是列表");
-  const rows = [];
-  for (const entry of data) {
-    const row = record(entry);
-    const code = text(row?.solution_code);
-    if (!row || !code) continue;
-    const parts: FallbackPart[] = [];
-    if (Array.isArray(row.accessory)) {
-      for (const item of row.accessory) {
-        const slot = record(item);
-        const slotId = text(slot?.slotID);
-        const objectId = positiveId(slot?.objectID);
-        if (!slotId || !objectId || !/^\d+$/.test(slotId)) continue;
-        parts.push({ slotId, objectId });
-      }
-    }
-    const gunId = positiveId(row.arms_id);
-    rows.push({
-      code,
-      name: text(row.name),
-      previewPic: safePic(row.preview_pic) ?? safePic(row.arms_pic),
-      gun: gunId ? { objectId: gunId, name: text(row.arms_name), pic: safePic(row.arms_pic), grade: null, price: null } : null,
-      parts,
-    });
-  }
-  return rows;
-}
-
-export function parseYufanItems(body: string): FallbackItem[] {
-  let data: unknown;
-  try {
-    data = JSON.parse(body);
-  } catch {
-    throw new Error("有力气物品接口不是 JSON");
-  }
-  if (!Array.isArray(data)) throw new Error("有力气物品接口不是列表");
-  const items: FallbackItem[] = [];
-  for (const entry of data) {
-    const row = record(entry);
-    const objectId = positiveId(row?.object_id);
-    if (!row || !objectId) continue;
-    items.push({
-      objectId,
-      name: text(row.object_name),
-      pic: safePic(row.pic),
-      grade: whole(row.grade),
-      price: priceOf(row.avg_price),
-    });
-  }
-  return items;
 }
 
 /** 交易行最新价。dataMap 的键是物品 id，值里的 avgPrice 是当前均价。 */

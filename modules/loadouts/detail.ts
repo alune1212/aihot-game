@@ -1,20 +1,16 @@
-// 方案详情和交易行价格都在 worker 里同步。读者打开页面只读库，不打官方接口。
+// 方案详情和价格都在 worker 里同步，只认官方 AMS。读者打开页面只读库。
 // 官方列表不能按分享码筛选（多传的字段会被忽略），所以按页把方案码对上库里的码。
-// 登录失效或官方接口失败时，改用有力气的配件表和枪械基础属性，并记在信源健康里。
+// 这一轮失败时留下上次成功的官方缓存；从没对上过的码不写行，页面显示「暂无官方详情」。
 import type { Db } from "@aihot/backend/db";
 import { sql } from "@aihot/backend/db";
 import { beijingDate } from "@aihot/contracts/time";
 import { guardedFetch } from "@aihot/backend/lib/http-fetch";
-import { SITE } from "@aihot/site";
 import {
   AMS_URL,
   amsForm,
   codeKey,
   parseLatestPrices,
   parseSolutionPage,
-  parseYufanCodes,
-  parseYufanItems,
-  payloadFromFallback,
   qqCookie,
   readAms,
   redactSecrets,
@@ -22,19 +18,17 @@ import {
   type LoadoutPayload,
   type LoadoutSlot,
 } from "./ams.ts";
-import { FEED_LABEL, isPreferredAuthor, SEASON_START, YUFAN_API_ORIGIN, YUFAN_ORIGIN, YUFAN_PAGE, yufanApiHeaders } from "./feeds.ts";
+import { FEED_LABEL, isPreferredAuthor, SEASON_START } from "./feeds.ts";
 import { formatApplyCount } from "./codes.ts";
 import { formatGamePrice } from "./parse-yufan.ts";
-import { mayFetch } from "./robots.ts";
 import { recordFeedFailure, recordFeedSuccess, type LoadoutCategoryView } from "./store.ts";
 
 const GAP_MS = 1200;
 const PAGE_SIZE = 20;
-/** shortcut: 官方方案现在约 850 条、每页 20 条。超过 60 页就停，剩下的改走公开表。 */
+/** shortcut: 官方方案现在约 850 条、每页 20 条。超过 60 页就停，剩下的等下一轮。 */
 const PAGE_CAP = 60;
 const ATTEMPTS = 3;
 const PRICE_BATCH = 40;
-const CODE_BATCH = 40;
 
 const FEED_DETAIL = { id: "ams", name: "官方改枪台" };
 const FEED_PRICE = { id: "ams-price", name: "官方交易行" };
@@ -96,36 +90,7 @@ async function postAms(fetchPage: IdeFetch, sleep: (ms: number) => Promise<void>
   return last;
 }
 
-async function allowYufan(fetchPage: IdeFetch, sleep: (ms: number) => Promise<void>): Promise<boolean> {
-  await sleep(GAP_MS);
-  const site = await fetchPage(new URL("/robots.txt", YUFAN_ORIGIN).toString());
-  const siteBody = site.status === 200 || site.status === 404 ? site.text() : "";
-  if (!mayFetch(site.status, siteBody, YUFAN_PAGE, SITE.crawlerName)) return false;
-  await sleep(GAP_MS);
-  const api = await fetchPage(new URL("/robots.txt", YUFAN_API_ORIGIN).toString());
-  const apiBody = api.status === 200 || api.status === 404 ? api.text() : "";
-  return mayFetch(api.status, apiBody, `${YUFAN_API_ORIGIN}/rest/v1/official_gun_codes`, SITE.crawlerName);
-}
-
-function yufanCodesUrl(codes: string[]): string {
-  const url = new URL("/rest/v1/official_gun_codes", YUFAN_API_ORIGIN);
-  const list = codes.map((code) => `"${code.replaceAll('"', "")}"`).join(",");
-  url.searchParams.set("select", "solution_code,name,arms_id,arms_name,arms_pic,preview_pic,accessory");
-  url.searchParams.set("solution_code", `in.(${list})`);
-  return url.toString();
-}
-
-function yufanItemsUrl(ids: number[]): string {
-  const url = new URL("/rest/v1/game_items", YUFAN_API_ORIGIN);
-  url.searchParams.set("select", "object_id,object_name,pic,grade,avg_price");
-  url.searchParams.set("object_id", `in.(${ids.join(",")})`);
-  return url.toString();
-}
-
-async function saveDetail(db: Db, loadoutId: number, payload: LoadoutPayload, at: Date): Promise<"saved" | "kept"> {
-  const [existing] = await db<{ source: string }[]>`SELECT source FROM loadout_details WHERE loadout_id = ${loadoutId}`;
-  if (existing?.source === "ams" && payload.source !== "ams") return "kept";
-  if (existing?.source === "yufan" && payload.source === "base") return "kept";
+async function saveDetail(db: Db, loadoutId: number, payload: LoadoutPayload, at: Date): Promise<void> {
   const { prices: _prices, ...stored } = payload;
   await db`INSERT INTO loadout_details (loadout_id, source, gun_object_id, payload, synced_at)
     VALUES (${loadoutId}, ${payload.source}, ${payload.gun.objectId}, ${sql.json(JSON.parse(JSON.stringify(stored)))}, ${at})
@@ -134,74 +99,20 @@ async function saveDetail(db: Db, loadoutId: number, payload: LoadoutPayload, at
       gun_object_id = EXCLUDED.gun_object_id,
       payload = EXCLUDED.payload,
       synced_at = EXCLUDED.synced_at`;
-  return "saved";
 }
 
-async function savePrices(db: Db, prices: Array<{ objectId: number; price: number }>, source: "ams" | "yufan", at: Date): Promise<void> {
+async function savePrices(db: Db, prices: Array<{ objectId: number; price: number }>, at: Date): Promise<void> {
   for (const row of prices) {
     await db`INSERT INTO loadout_item_prices (object_id, price, source, priced_at)
-      VALUES (${row.objectId}, ${row.price}, ${source}, ${at})
+      VALUES (${row.objectId}, ${row.price}, 'ams', ${at})
       ON CONFLICT (object_id) DO UPDATE SET
         price = EXCLUDED.price,
         source = EXCLUDED.source,
-        priced_at = EXCLUDED.priced_at
-      WHERE EXCLUDED.source = 'ams' OR loadout_item_prices.source <> 'ams'`;
+        priced_at = EXCLUDED.priced_at`;
   }
 }
 
-async function fillFromYufan(
-  db: Db,
-  fetchPage: IdeFetch,
-  sleep: (ms: number) => Promise<void>,
-  rows: Array<{ id: number; code: string; weapon: string }>,
-  at: Date,
-): Promise<{ saved: number; note: string }> {
-  if (!rows.length) return { saved: 0, note: "" };
-  if (!await allowYufan(fetchPage, sleep)) return { saved: 0, note: "有力气的 robots.txt 不允许抓取" };
-  const headers = yufanApiHeaders();
-  let saved = 0;
-  for (let offset = 0; offset < rows.length; offset += CODE_BATCH) {
-    const batch = rows.slice(offset, offset + CODE_BATCH);
-    await sleep(GAP_MS);
-    const res = await fetchPage(yufanCodesUrl(batch.map((row) => row.code)), { headers });
-    if (res.status !== 200) throw new Error(`有力气方案 HTTP ${res.status}`);
-    const found = parseYufanCodes(res.text());
-    const byCode = new Map(found.map((row) => [codeKey(row.code), row]));
-    const ids = new Set<number>();
-    for (const row of found) {
-      if (row.gun?.objectId) ids.add(row.gun.objectId);
-      for (const part of row.parts) ids.add(part.objectId);
-    }
-    const items = new Map<number, ReturnType<typeof parseYufanItems>[number]>();
-    const idList = [...ids];
-    for (let itemOffset = 0; itemOffset < idList.length; itemOffset += PRICE_BATCH) {
-      const slice = idList.slice(itemOffset, itemOffset + PRICE_BATCH);
-      if (!slice.length) continue;
-      await sleep(GAP_MS);
-      const itemRes = await fetchPage(yufanItemsUrl(slice), { headers });
-      if (itemRes.status !== 200) throw new Error(`有力气物品 HTTP ${itemRes.status}`);
-      for (const item of parseYufanItems(itemRes.text())) items.set(item.objectId, item);
-    }
-    for (const row of batch) {
-      const hit = byCode.get(codeKey(row.code));
-      const gun = hit?.gun?.objectId ? items.get(hit.gun.objectId) ?? { ...hit.gun, price: null } : null;
-      const payload = payloadFromFallback({
-        source: hit ? "yufan" : "base",
-        weapon: row.weapon,
-        name: hit?.name ?? null,
-        previewPic: hit?.previewPic ?? gun?.pic ?? null,
-        gun,
-        parts: hit?.parts ?? [],
-        items,
-      });
-      if ((await saveDetail(db, row.id, payload, at)) === "saved") saved += 1;
-      await savePrices(db, payload.prices, "yufan", at);
-    }
-  }
-  return { saved, note: `有力气补了 ${saved} 条` };
-}
-
-/** 把库里每条改枪码对上官方方案；对不上或登录失效时改用公开表。 */
+/** 把库里每条改枪码对上官方方案。失败时不改已有的官方缓存。 */
 export async function syncLoadoutDetails(deps: { fetch?: IdeFetch; sleep?: (ms: number) => Promise<void>; env?: { DF_QQ_COOKIE?: string }; now?: () => Date } = {}): Promise<Record<string, unknown>> {
   const fetchPage = deps.fetch ?? defaultFetch;
   const sleep = deps.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
@@ -234,32 +145,25 @@ export async function syncLoadoutDetails(deps: { fetch?: IdeFetch; sleep?: (ms: 
         const row = pending.get(codeKey(item.code));
         if (!row) continue;
         await saveDetail(sql, row.id, item.payload, at);
-        await savePrices(sql, item.payload.prices, "ams", at);
+        await savePrices(sql, item.payload.prices, at);
         pending.delete(codeKey(item.code));
         matched += 1;
       }
       if (!parsed.items.length) break;
       page += 1;
     }
-    if (!failure && pending.size && page > PAGE_CAP) failure = `官方方案超过 ${PAGE_CAP} 页，剩下的改用公开表`;
+    if (!failure && pending.size && page > PAGE_CAP) failure = `官方方案超过 ${PAGE_CAP} 页，这一轮没翻完`;
   }
-  let fallback = { saved: 0, note: "" };
-  try {
-    if (pending.size) fallback = await fillFromYufan(sql, fetchPage, sleep, [...pending.values()], at);
-  } catch (error) {
-    const message = redactSecrets(error instanceof Error ? error.message : String(error), cookie?.secrets ?? []);
-    failure = failure ? `${failure}；${message}` : message;
-  }
-  const login = cookie ? "已附带 QQ 登录态" : "未配置 DF_QQ_COOKIE";
-  const summary = `对上官方方案 ${matched} 条（${pages} 页）。${login}。${fallback.note}`.replace(/\s+/g, " ").trim();
+  const login = cookie ? "请求附带了 QQ 登录态" : "未配置 DF_QQ_COOKIE，按匿名请求";
+  const missing = pending.size ? `，${pending.size} 条不在官方列表里` : "";
+  const summary = (rows.length ? `对上官方方案 ${matched} 条（${pages} 页）${missing}。${login}` : "库里还没有改枪码").slice(0, 500);
   if (failure) {
-    const message = redactSecrets(`${failure}。${summary}`, cookie?.secrets ?? []);
+    const message = redactSecrets(`${failure}。已有的官方详情保留。${summary}`, cookie?.secrets ?? []);
     await recordFeedFailure(sql, FEED_DETAIL.id, FEED_DETAIL.name, message);
-    return { ok: false, matched, pages, fallback: fallback.saved, error: message };
+    return { ok: false, matched, pages, missing: pending.size, error: message };
   }
-  const note = pending.size && !rows.length ? "库里还没有改枪码" : summary;
-  await recordFeedSuccess(sql, FEED_DETAIL.id, FEED_DETAIL.name, note.slice(0, 500));
-  return { ok: true, matched, pages, fallback: fallback.saved };
+  await recordFeedSuccess(sql, FEED_DETAIL.id, FEED_DETAIL.name, summary);
+  return { ok: true, matched, pages, missing: pending.size };
 }
 
 function collectObjectIds(payload: LoadoutPayload): number[] {
@@ -269,13 +173,13 @@ function collectObjectIds(payload: LoadoutPayload): number[] {
   return [...ids];
 }
 
-/** 按库里方案用到的物品，刷新交易行最新价。登录失效时改用有力气的均价。 */
+/** 按已缓存的官方方案刷新交易行最新价。失败时不改已有价格。 */
 export async function syncLoadoutPrices(deps: { fetch?: IdeFetch; sleep?: (ms: number) => Promise<void>; env?: { DF_QQ_COOKIE?: string }; now?: () => Date } = {}): Promise<Record<string, unknown>> {
   const fetchPage = deps.fetch ?? defaultFetch;
   const sleep = deps.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
   const at = (deps.now ?? (() => new Date()))();
   const cookie = qqCookie(deps.env);
-  const stored = await sql<{ payload: LoadoutPayload }[]>`SELECT payload FROM loadout_details`;
+  const stored = await sql<{ payload: LoadoutPayload }[]>`SELECT payload FROM loadout_details WHERE source = 'ams'`;
   const ids = [...new Set(stored.flatMap((row) => collectObjectIds(row.payload)))];
   if (!ids.length) {
     await recordFeedSuccess(sql, FEED_PRICE.id, FEED_PRICE.name, "还没有需要刷新价格的物品");
@@ -283,45 +187,20 @@ export async function syncLoadoutPrices(deps: { fetch?: IdeFetch; sleep?: (ms: n
   }
   let priced = 0;
   let failure: string | null = null;
-  const missed: number[] = [];
   for (let offset = 0; offset < ids.length && !failure; offset += PRICE_BATCH) {
     const batch = ids.slice(offset, offset + PRICE_BATCH);
     const result = await postAms(fetchPage, sleep, "dfm/object.price.latest", { objectID: batch }, cookie);
     if (!result.ok) {
       failure = result.message;
-      missed.push(...ids.slice(offset));
       break;
     }
     const prices = parseLatestPrices(result.data);
-    const got = new Set(prices.map((row) => row.objectId));
-    await savePrices(sql, prices, "ams", at);
+    await savePrices(sql, prices, at);
     priced += prices.length;
-    missed.push(...batch.filter((id) => !got.has(id)));
   }
-  if (failure && missed.length) {
-    try {
-      if (await allowYufan(fetchPage, sleep)) {
-        const headers = yufanApiHeaders();
-        for (let offset = 0; offset < missed.length; offset += PRICE_BATCH) {
-          const batch = missed.slice(offset, offset + PRICE_BATCH);
-          await sleep(GAP_MS);
-          const res = await fetchPage(yufanItemsUrl(batch), { headers });
-          if (res.status !== 200) throw new Error(`有力气物品 HTTP ${res.status}`);
-          const prices = parseYufanItems(res.text()).flatMap((item) => item.price === null ? [] : [{ objectId: item.objectId, price: item.price }]);
-          await savePrices(sql, prices, "yufan", at);
-          priced += prices.length;
-        }
-      } else {
-        failure = `${failure}；有力气的 robots.txt 不允许抓取`;
-      }
-    } catch (error) {
-      const message = redactSecrets(error instanceof Error ? error.message : String(error), cookie?.secrets ?? []);
-      failure = `${failure}；${message}`;
-    }
-  }
-  const login = cookie ? "已附带 QQ 登录态" : "未配置 DF_QQ_COOKIE";
+  const login = cookie ? "请求附带了 QQ 登录态" : "未配置 DF_QQ_COOKIE，按匿名请求";
   if (failure) {
-    const message = redactSecrets(`${failure}。已有价格 ${priced} 条。${login}`, cookie?.secrets ?? []);
+    const message = redactSecrets(`${failure}。已缓存的官方价格继续显示。本轮写上 ${priced} 条。${login}`, cookie?.secrets ?? []);
     await recordFeedFailure(sql, FEED_PRICE.id, FEED_PRICE.name, message);
     return { ok: false, priced, error: message };
   }
@@ -354,20 +233,13 @@ export interface LoadoutDetailView {
   previewPic: string | null;
   gun: LoadoutPayload["gun"];
   properties: LoadoutPayload["properties"];
-  attributeNote: string | null;
   slots: Array<LoadoutSlot & { price: number | null }>;
   prices: PriceSummary;
 }
 
-const SOURCE_LABEL: Record<DetailSource, string> = {
-  ams: "官方改枪台",
-  yufan: "有力气公开表",
-  base: "武器基础属性",
-};
-
 function asPayload(value: unknown): LoadoutPayload | null {
   const row = value && typeof value === "object" ? value as Partial<LoadoutPayload> : null;
-  if (!row || (row.source !== "ams" && row.source !== "yufan" && row.source !== "base") || !row.gun || !Array.isArray(row.slots)) return null;
+  if (!row || row.source !== "ams" || !row.gun || !Array.isArray(row.slots)) return null;
   return row as LoadoutPayload;
 }
 
@@ -415,25 +287,24 @@ export async function loadoutDetail(db: Db, id: number): Promise<{ code: PublicL
   const shown = presentCode(code);
   const [row] = await db<{ source: DetailSource; payload: unknown; synced_at: Date }[]>`
     SELECT source, payload, synced_at FROM loadout_details WHERE loadout_id = ${id}`;
-  const payload = asPayload(row?.payload);
+  const payload = row?.source === "ams" ? asPayload(row.payload) : null;
   if (!row || !payload) return { code: shown, detail: null };
   const ids = collectObjectIds(payload);
   const quotes = ids.length
     ? await db<{ object_id: number; price: number; priced_at: Date }[]>`
-        SELECT object_id, price, priced_at FROM loadout_item_prices WHERE object_id IN ${sql(ids)}`
+        SELECT object_id, price, priced_at FROM loadout_item_prices WHERE source = 'ams' AND object_id IN ${sql(ids)}`
     : [];
   const prices = new Map(quotes.map((quote) => [Number(quote.object_id), { price: quote.price, at: quote.priced_at.toISOString() }]));
   return {
     code: shown,
     detail: {
       source: payload.source,
-      sourceLabel: SOURCE_LABEL[payload.source],
+      sourceLabel: "官方改枪台",
       syncedAt: row.synced_at.toISOString(),
       name: payload.name,
       previewPic: payload.previewPic,
       gun: payload.gun,
       properties: payload.properties,
-      attributeNote: payload.properties && payload.source !== "ams" ? "公开源只有原枪属性，没有改装前后的差值。" : null,
       slots: payload.slots.map((slot) => ({ ...slot, price: slot.objectId ? prices.get(slot.objectId)?.price ?? null : null })),
       prices: summarizePrices(payload.gun.objectId, payload.slots, prices),
     },
@@ -462,7 +333,7 @@ export async function priceLoadoutList(db: Db, categories: LoadoutCategoryView[]
   if (!codes.length) return categories;
   const ids = codes.map((code) => code.id);
   const details = await db<{ loadout_id: number; gun_object_id: number | null; payload: unknown }[]>`
-    SELECT loadout_id, gun_object_id, payload FROM loadout_details WHERE loadout_id IN ${sql(ids)}`;
+    SELECT loadout_id, gun_object_id, payload FROM loadout_details WHERE source = 'ams' AND loadout_id IN ${sql(ids)}`;
   const objectIds = new Set<number>();
   const byLoadout = new Map<number, { gunObjectId: number | null; slots: LoadoutSlot[] }>();
   for (const row of details) {
@@ -473,7 +344,7 @@ export async function priceLoadoutList(db: Db, categories: LoadoutCategoryView[]
   }
   const quotes = objectIds.size
     ? await db<{ object_id: number; price: number; priced_at: Date }[]>`
-        SELECT object_id, price, priced_at FROM loadout_item_prices WHERE object_id IN ${sql([...objectIds])}`
+        SELECT object_id, price, priced_at FROM loadout_item_prices WHERE source = 'ams' AND object_id IN ${sql([...objectIds])}`
     : [];
   const prices = new Map(quotes.map((quote) => [Number(quote.object_id), { price: quote.price, at: quote.priced_at.toISOString() }]));
   return categories.map((category) => ({

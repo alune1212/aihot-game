@@ -44,14 +44,13 @@ interface Payload {
     stale: boolean;
   };
   detail: {
-    source: "ams" | "yufan" | "base";
+    source: "ams";
     sourceLabel: string;
     syncedAt: string;
     name: string | null;
     previewPic: string | null;
     gun: { objectId: number | null; name: string; pic: string | null; grade: number | null };
     properties: { origin: Stats; change: Stats | null; fireMode: string | null; muzzleVelocity: number | null; capacity: number | null } | null;
-    attributeNote: string | null;
     slots: Slot[];
     prices: { gun: number | null; parts: number | null; total: number | null; pricedAt: string | null; complete: boolean };
   } | null;
@@ -147,6 +146,17 @@ function polygon(stats: Stats, radius: number): string {
   return RADAR.map((axis, index) => point(index, stats[axis.key], axis.scale, radius).join(",")).join(" ");
 }
 
+function SeriesKey({ dashed, label }: { dashed: boolean; label: string }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 text-ink-2">
+      <svg width="28" height="10" aria-hidden="true">
+        <line x1="1" y1="5" x2="27" y2="5" stroke={dashed ? "var(--ink-3)" : "var(--accent)"} strokeWidth={dashed ? 1.75 : 2.75} strokeDasharray={dashed ? "4 3" : undefined} />
+      </svg>
+      {label}
+    </span>
+  );
+}
+
 function Radar({ origin, change }: { origin: Stats; change: Stats | null }) {
   const rings = [0.25, 0.5, 0.75, 1];
   const after = change
@@ -154,37 +164,37 @@ function Radar({ origin, change }: { origin: Stats; change: Stats | null }) {
     : null;
   return (
     <figure className="rounded-card border border-line bg-surface p-3">
-      <figcaption className="flex items-center justify-between text-[12px] text-ink-4">
-        <span>改装前后</span>
-        <span className="flex gap-3">
-          <span className="inline-flex items-center gap-1"><i className="inline-block size-2 rounded-full bg-ink-4" />改装前</span>
-          {after ? <span className="inline-flex items-center gap-1"><i className="inline-block size-2 rounded-full bg-accent" />改装后</span> : null}
+      <figcaption className="flex flex-wrap items-center justify-between gap-2 text-[12px]">
+        <span className="text-ink-3">改装前后</span>
+        <span className="flex gap-4">
+          <SeriesKey dashed label="改装前" />
+          {after ? <SeriesKey dashed={false} label="改装后" /> : null}
         </span>
       </figcaption>
       <svg viewBox="0 0 320 320" role="img" aria-labelledby="radar-title" className="mx-auto mt-1 w-full max-w-[320px]">
-        <title id="radar-title">改装前后的枪械属性雷达图。数值见旁边的表。射速按 1200 发/分折到外圈。</title>
+        <title id="radar-title">改装前后的枪械属性雷达图。虚线是改装前，实心品牌色是改装后。数值见旁边的表。射速按 1200 发/分折到外圈。</title>
         {rings.map((ring) => (
-          <polygon key={ring} points={polygon({ meatHarm: 100 * ring, armorHarm: 100 * ring, shootDistance: 100 * ring, recoil: 100 * ring, control: 100 * ring, stable: 100 * ring, hipShot: 100 * ring, fireSpeed: 1200 * ring }, 104)} fill="none" stroke="var(--line)" />
+          <polygon key={ring} points={polygon({ meatHarm: 100 * ring, armorHarm: 100 * ring, shootDistance: 100 * ring, recoil: 100 * ring, control: 100 * ring, stable: 100 * ring, hipShot: 100 * ring, fireSpeed: 1200 * ring }, 104)} fill="none" stroke="var(--line-strong)" />
         ))}
         {RADAR.map((axis, index) => {
           const [x, y] = point(index, axis.scale, axis.scale, 104);
           const [lx, ly] = point(index, axis.scale, axis.scale, 126);
           return (
             <g key={axis.key}>
-              <line x1="160" y1="160" x2={x} y2={y} stroke="var(--line)" />
+              <line x1="160" y1="160" x2={x} y2={y} stroke="var(--line-strong)" />
               <text x={lx} y={ly} textAnchor="middle" dominantBaseline="middle" fill="var(--ink-3)" fontSize="11">{axis.label}</text>
             </g>
           );
         })}
-        <polygon points={polygon(origin, 104)} fill="color-mix(in srgb, var(--ink-4) 16%, transparent)" stroke="var(--ink-4)" strokeWidth="1.5" />
-        {after ? <polygon points={polygon(after, 104)} fill="color-mix(in srgb, var(--accent) 22%, transparent)" stroke="var(--accent)" strokeWidth="1.5" /> : null}
+        <polygon points={polygon(origin, 104)} fill="none" stroke="var(--ink-3)" strokeWidth="1.75" strokeDasharray="5 4" />
+        {after ? <polygon points={polygon(after, 104)} fill="color-mix(in srgb, var(--accent) 32%, transparent)" stroke="var(--accent)" strokeWidth="2.75" /> : null}
       </svg>
-      <p className="text-center text-[11px] text-ink-4">射速按 1200 发/分折到外圈，其余属性按 100。</p>
+      <p className="text-center text-[11px] text-ink-4">虚线是改装前，实心是改装后。射速按 1200 发/分折到外圈，其余属性按 100。增加用品牌色，减少用红色，和右边的表一致。</p>
     </figure>
   );
 }
 
-function AttributeTable({ properties, note }: { properties: NonNullable<Payload["detail"]>["properties"]; note: string | null }) {
+function AttributeTable({ properties }: { properties: NonNullable<Payload["detail"]>["properties"] }) {
   if (!properties) return <p className="rounded-card border border-line bg-surface px-4 py-6 text-[13px] text-ink-4">还没有这把枪的属性。</p>;
   const rows: Array<{ label: string; before: string; after: string; delta: string | null }> = TABLE.map((row) => {
     const before = properties.origin[row.key];
@@ -218,13 +228,13 @@ function AttributeTable({ properties, note }: { properties: NonNullable<Payload[
             <tr key={row.label} className="border-b border-line-soft last:border-0">
               <th scope="row" className="px-3 py-2 font-normal text-ink">{row.label}</th>
               <td className="num px-3 py-2 text-right text-ink-3">{row.before}</td>
-              <td className="num px-3 py-2 text-right text-ink">{row.after}</td>
-              <td className={`num px-3 py-2 text-right ${row.delta === null ? "text-ink-4" : row.delta.startsWith("+") ? "text-accent" : row.delta.startsWith("-") ? "text-hot" : "text-ink-4"}`}>{row.delta ?? "—"}</td>
+              <td className={`num px-3 py-2 text-right ${row.after === "—" ? "text-ink-4" : "font-medium text-accent"}`}>{row.after}</td>
+              <td className={`num px-3 py-2 text-right font-medium ${row.delta === null || row.delta === "0" ? "font-normal text-ink-4" : row.delta.startsWith("+") ? "text-accent" : "text-hot"}`}>{row.delta ?? "—"}</td>
             </tr>
           ))}
         </tbody>
       </table>
-      {note ? <p className="border-t border-line-soft px-3 py-2 text-[12px] text-ink-4">{note} 枪口初速的变化写在配件效果里。</p> : <p className="border-t border-line-soft px-3 py-2 text-[12px] text-ink-4">枪口初速和开火模式官方只给了原枪数值，增减看配件效果。</p>}
+      <p className="border-t border-line-soft px-3 py-2 text-[12px] text-ink-4">改装后用品牌色，增加同样用品牌色，减少用红色。枪口初速和开火模式官方只给了原枪数值，增减看配件效果。</p>
     </div>
   );
 }
@@ -251,7 +261,7 @@ export default function LoadoutDetailPage() {
             <CopyCode code={code.code} />
           </div>
           <p className="mt-2 text-[12px] text-ink-4">
-            {detail ? <>数据来自{detail.sourceLabel} · 同步于 {beijingStamp(detail.syncedAt)}</> : "配件和属性还没同步"}
+            {detail ? <>数据来自{detail.sourceLabel} · 更新于 {beijingStamp(detail.syncedAt)}</> : "暂无官方详情"}
             {code.source ? <> · 码的来源 {code.sourceUrl ? <a href={code.sourceUrl} className="text-accent hover:underline">{code.source}</a> : code.source}</> : null}
             {code.postedOn ? ` · ${code.postedOn}` : ""}
           </p>
@@ -260,8 +270,8 @@ export default function LoadoutDetailPage() {
       {detail ? (
         <>
           <div className="mt-6 grid items-start gap-4 lg:grid-cols-2">
-            {detail.properties ? <Radar origin={detail.properties.origin} change={detail.properties.change} /> : <p className="rounded-card border border-line bg-surface px-4 py-6 text-[13px] text-ink-4">还没有雷达图可以用的属性。</p>}
-            <AttributeTable properties={detail.properties} note={detail.attributeNote} />
+            {detail.properties ? <Radar origin={detail.properties.origin} change={detail.properties.change} /> : <p className="rounded-card border border-line bg-surface px-4 py-6 text-[13px] text-ink-4">官方方案里没有这把枪的属性。</p>}
+            <AttributeTable properties={detail.properties} />
           </div>
           <h2 className="mt-8 text-[15px] font-bold text-ink">配件</h2>
           {detail.slots.length ? (
@@ -285,7 +295,7 @@ export default function LoadoutDetailPage() {
               ))}
             </ul>
           ) : (
-            <p className="mt-2 text-[13px] text-ink-4">这条码没有公开的配件。官方方案列表和有力气公开表里都还没有它。</p>
+            <p className="mt-2 text-[13px] text-ink-4">官方方案里没有配件。</p>
           )}
           <section className="mt-6 rounded-card border border-line bg-surface px-4 py-3 text-[13px]" aria-label="价格">
             <dl className="grid grid-cols-3 gap-3">
@@ -311,7 +321,7 @@ export default function LoadoutDetailPage() {
         </>
       ) : (
         <p className="mt-6 rounded-card border border-dashed border-line-strong px-4 py-8 text-[13px] leading-relaxed text-ink-3">
-          这条改枪码还没有配件和属性。配置好 DF_QQ_COOKIE 后，下一轮同步会去官方改枪台查；官方接口不可用时，改用有力气的公开表。
+          暂无官方详情。官方改枪台还没对上这条码；查到之前这里留空。上次已经成功的方案会继续显示当时的数据和更新时间。
         </p>
       )}
     </div>
