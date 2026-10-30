@@ -91,7 +91,7 @@ export default defineServerModule({
   llms: () => ({
     pages: [`- [改枪码](/loadouts): 按《${GAME_NAME}》的枪种和枪名浏览改枪码。点进一条可以看到配件、最新价格和改装前后的属性`],
     api: [
-      "- GET /api/loadouts — 改枪码，按枪种和枪名分组，带作者、来源和整枪总价（价格齐了才有）",
+      "- GET /api/loadouts — 改枪码，按枪种和枪名分组，带官方枪图、品质、作者、来源和整枪总价（价格齐了才有）",
       "- GET /api/loadouts/:id — 一条改枪码的配件、单价、总价和属性",
     ],
   }),

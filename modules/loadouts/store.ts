@@ -5,6 +5,12 @@ import { extractLoadouts } from "./extract.ts";
 import { formatApplyCount, type FeedRow } from "./codes.ts";
 import { isPreferredAuthor, OFFICIAL_FEED_ID, publicFeed, SEASON_START } from "./feeds.ts";
 
+export interface LoadoutPart {
+  name: string | null;
+  pic: string | null;
+  grade: number | null;
+}
+
 export interface LoadoutCode {
   id: number;
   code: string;
@@ -23,10 +29,20 @@ export interface LoadoutCode {
   stale: boolean;
   /** 枪身加配件的最新总价。还没齐的时候是 null，不用方案上的旧标价。 */
   totalText: string | null;
+  /** 和 totalText 同一笔官方总价，方便列表算最低价。没有就是 null。 */
+  total: number | null;
+  /** 官方方案名。这条码还没对上官方详情时是 null。 */
+  name: string | null;
+  partCount: number;
+  parts: LoadoutPart[];
 }
 
 export interface LoadoutWeapon {
   name: string;
+  /** 官方物品图。这把枪在官方方案里没出现过就是 null。 */
+  pic: string | null;
+  grade: number | null;
+  objectId: number | null;
   codes: LoadoutCode[];
 }
 
@@ -179,6 +195,10 @@ export async function listLoadouts(db: Db, gameId = GAME_ID): Promise<{ gameId: 
       featured: isPreferredAuthor(row.author) && !isStale(row.noted_at),
       stale: isStale(row.noted_at),
       totalText: null,
+      total: null,
+      name: null,
+      partCount: 0,
+      parts: [],
     });
     byWeapon.set(row.weapon, list);
   }
@@ -188,7 +208,13 @@ export async function listLoadouts(db: Db, gameId = GAME_ID): Promise<{ gameId: 
       key: category.key,
       label: category.label,
       note: category.note,
-      weapons: category.weapons.filter((weapon) => isWeaponListed(weapon)).map((weapon) => ({ name: weapon.name, codes: byWeapon.get(weapon.name) ?? [] })),
+      weapons: category.weapons.filter((weapon) => isWeaponListed(weapon)).map((weapon) => ({
+        name: weapon.name,
+        pic: null,
+        grade: null,
+        objectId: null,
+        codes: byWeapon.get(weapon.name) ?? [],
+      })),
     })),
   };
 }

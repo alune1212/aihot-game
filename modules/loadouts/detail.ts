@@ -18,7 +18,8 @@ import {
   type LoadoutPayload,
   type LoadoutSlot,
 } from "./ams.ts";
-import { isPreferredAuthor, publicFeed, SEASON_START } from "./feeds.ts";
+import { GAME_ID, matchWeapon, WEAPON_CATEGORIES } from "./catalog.ts";
+import { isPreferredAuthor, OFFICIAL_FEED_ID, publicFeed, SEASON_START } from "./feeds.ts";
 import { formatApplyCount } from "./codes.ts";
 import { formatGamePrice } from "./parse-yufan.ts";
 import { recordFeedFailure, recordFeedSuccess, type LoadoutCategoryView } from "./store.ts";
@@ -112,7 +113,22 @@ async function savePrices(db: Db, prices: Array<{ objectId: number; price: numbe
   }
 }
 
-/** 把库里每条改枪码对上官方方案。失败时不改已有的官方缓存。 */
+/** 官方方案里的枪，按名录归到一把枪。对不上名录的不记，调用方不要猜。 */
+async function rememberGun(code: string, payload: LoadoutPayload, at: Date): Promise<string | null> {
+  const matched = matchWeapon(code) ?? (payload.gun.name ? matchWeapon(payload.gun.name) : null);
+  if (!matched) return null;
+  await sql`INSERT INTO loadout_guns (weapon, category_key, object_id, pic, grade, synced_at)
+    VALUES (${matched.weapon}, ${matched.categoryKey}, ${payload.gun.objectId}, ${payload.gun.pic}, ${payload.gun.grade}, ${at})
+    ON CONFLICT (weapon) DO UPDATE SET
+      category_key = EXCLUDED.category_key,
+      object_id = COALESCE(EXCLUDED.object_id, loadout_guns.object_id),
+      pic = COALESCE(EXCLUDED.pic, loadout_guns.pic),
+      grade = COALESCE(EXCLUDED.grade, loadout_guns.grade),
+      synced_at = EXCLUDED.synced_at`;
+  return matched.weapon;
+}
+
+/** 把库里每条改枪码对上官方方案，并按整份官方列表记下枪图。失败时不改已有的官方缓存。 */
 export async function syncLoadoutDetails(deps: { fetch?: IdeFetch; sleep?: (ms: number) => Promise<void>; env?: { DF_QQ_COOKIE?: string }; now?: () => Date } = {}): Promise<Record<string, unknown>> {
   const fetchPage = deps.fetch ?? defaultFetch;
   const sleep = deps.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
@@ -125,45 +141,49 @@ export async function syncLoadoutDetails(deps: { fetch?: IdeFetch; sleep?: (ms: 
   let matched = 0;
   let pages = 0;
   let failure: string | null = null;
-  if (pending.size) {
-    let page = 1;
-    let total = PAGE_SIZE;
-    while (page <= PAGE_CAP && (page - 1) * PAGE_SIZE < total && pending.size) {
-      const result = await postAms(fetchPage, sleep, "dfm/solution.arms.list", { page, limit: PAGE_SIZE, solutionType: "gun" }, cookie);
-      pages += 1;
-      if (!result.ok) {
-        failure = result.message;
-        break;
-      }
-      const parsed = parseSolutionPage(result.data);
-      if (!parsed) {
-        failure = "官方方案列表的结构变了";
-        break;
-      }
-      total = parsed.total;
-      for (const item of parsed.items) {
-        const row = pending.get(codeKey(item.code));
-        if (!row) continue;
-        await saveDetail(sql, row.id, item.payload, at);
-        await savePrices(sql, item.payload.prices, at);
-        pending.delete(codeKey(item.code));
-        matched += 1;
-      }
-      if (!parsed.items.length) break;
-      page += 1;
+  const guns = new Set<string>();
+  let page = 1;
+  let total = PAGE_SIZE;
+  // 库里的码对上之后继续翻页：枪图要覆盖官方列表里的每一把枪，不能停在已收录的码上。
+  while (page <= PAGE_CAP && (page - 1) * PAGE_SIZE < total) {
+    const result = await postAms(fetchPage, sleep, "dfm/solution.arms.list", { page, limit: PAGE_SIZE, solutionType: "gun" }, cookie);
+    pages += 1;
+    if (!result.ok) {
+      failure = result.message;
+      break;
     }
-    if (!failure && pending.size && page > PAGE_CAP) failure = `官方方案超过 ${PAGE_CAP} 页，这一轮没翻完`;
+    const parsed = parseSolutionPage(result.data);
+    if (!parsed) {
+      failure = "官方方案列表的结构变了";
+      break;
+    }
+    total = parsed.total;
+    for (const item of parsed.items) {
+      const weapon = await rememberGun(item.code, item.payload, at);
+      if (weapon) guns.add(weapon);
+      const row = pending.get(codeKey(item.code));
+      if (!row) continue;
+      await saveDetail(sql, row.id, item.payload, at);
+      await savePrices(sql, item.payload.prices, at);
+      pending.delete(codeKey(item.code));
+      matched += 1;
+    }
+    if (!parsed.items.length) break;
+    page += 1;
   }
+  if (!failure && pending.size && page > PAGE_CAP) failure = `官方方案超过 ${PAGE_CAP} 页，这一轮没翻完`;
   const login = cookie ? "请求附带了 QQ 登录态" : "未配置 DF_QQ_COOKIE，按匿名请求";
   const missing = pending.size ? `，${pending.size} 条不在官方列表里` : "";
-  const summary = (rows.length ? `对上官方方案 ${matched} 条（${pages} 页）${missing}。${login}` : "库里还没有改枪码").slice(0, 500);
+  const summary = (rows.length
+    ? `对上官方方案 ${matched} 条（${pages} 页）${missing}。记下 ${guns.size} 把枪的官方图。${login}`
+    : `库里还没有改枪码。记下 ${guns.size} 把枪的官方图（${pages} 页）。${login}`).slice(0, 500);
   if (failure) {
     const message = redactSecrets(`${failure}。已有的官方详情保留。${summary}`, cookie?.secrets ?? []);
     await recordFeedFailure(sql, FEED_DETAIL.id, FEED_DETAIL.name, message);
-    return { ok: false, matched, pages, missing: pending.size, error: message };
+    return { ok: false, matched, pages, guns: guns.size, missing: pending.size, error: message };
   }
   await recordFeedSuccess(sql, FEED_DETAIL.id, FEED_DETAIL.name, summary);
-  return { ok: true, matched, pages, missing: pending.size };
+  return { ok: true, matched, pages, guns: guns.size, missing: pending.size };
 }
 
 function collectObjectIds(payload: LoadoutPayload): number[] {
@@ -278,35 +298,150 @@ function presentCode(row: StoredCode): PublicLoadoutCode {
   };
 }
 
-export async function loadoutDetail(db: Db, id: number): Promise<{ code: PublicLoadoutCode; detail: LoadoutDetailView | null } | null> {
+const SIBLING_CAP = 40;
+const RELATED_CAP = 6;
+
+export interface LoadoutGunView {
+  pic: string | null;
+  grade: number | null;
+  objectId: number | null;
+}
+
+export interface LoadoutSiblingView {
+  id: number;
+  name: string | null;
+  mode: string | null;
+  source: string | null;
+  popularityText: string | null;
+  featured: boolean;
+  stale: boolean;
+  hasDetail: boolean;
+}
+
+export interface LoadoutRelatedView {
+  id: number;
+  name: string | null;
+  source: string | null;
+  popularityText: string | null;
+  totalText: string | null;
+  pic: string | null;
+}
+
+function categoryLabelOf(key: string): string {
+  return WEAPON_CATEGORIES.find((category) => category.key === key)?.label ?? key;
+}
+
+function rankCode(row: StoredCode): number {
+  const postedOn = row.noted_at ? beijingDate(row.noted_at) : null;
+  if (postedOn && postedOn < SEASON_START) return 3;
+  if (row.source === OFFICIAL_FEED_ID) return 0;
+  return isPreferredAuthor(row.author) ? 1 : 2;
+}
+
+export async function loadoutDetail(db: Db, id: number): Promise<{
+  code: PublicLoadoutCode;
+  categoryLabel: string;
+  gun: LoadoutGunView;
+  siblings: LoadoutSiblingView[];
+  related: LoadoutRelatedView[];
+  detail: LoadoutDetailView | null;
+} | null> {
   const [code] = await db<StoredCode[]>`
     SELECT id, category_key, weapon, code, mode, price_text, author, popularity, source, source_url, noted_at
     FROM loadout_codes WHERE id = ${id}`;
   if (!code) return null;
   const shown = presentCode(code);
-  const [row] = await db<{ source: DetailSource; payload: unknown; synced_at: Date }[]>`
+  const family = await db<StoredCode[]>`
+    SELECT id, category_key, weapon, code, mode, price_text, author, popularity, source, source_url, noted_at
+    FROM loadout_codes WHERE game_id = ${GAME_ID} AND weapon = ${code.weapon}`;
+  const ranked = [...family].sort((a, b) => {
+    const byRank = rankCode(a) - rankCode(b);
+    if (byRank) return byRank;
+    const byPop = (b.popularity ?? -1) - (a.popularity ?? -1);
+    if (byPop) return byPop;
+    return Number(b.id) - Number(a.id);
+  });
+  const kept = ranked.slice(0, SIBLING_CAP);
+  if (!kept.some((row) => Number(row.id) === Number(code.id))) kept.push(code);
+  const detailRows = family.length
+    ? await db<{ loadout_id: number; payload: unknown }[]>`
+        SELECT loadout_id, payload FROM loadout_details WHERE source = 'ams' AND loadout_id IN ${sql(family.map((row) => row.id))}`
+    : [];
+  const payloads = new Map<number, LoadoutPayload>();
+  for (const row of detailRows) {
+    const payload = asPayload(row.payload);
+    if (payload) payloads.set(Number(row.loadout_id), payload);
+  }
+  const siblings: LoadoutSiblingView[] = kept.map((row) => {
+    const view = presentCode(row);
+    return {
+      id: view.id,
+      name: payloads.get(view.id)?.name ?? null,
+      mode: view.mode,
+      source: view.source,
+      popularityText: view.popularityText,
+      featured: view.featured,
+      stale: view.stale,
+      hasDetail: payloads.has(view.id),
+    };
+  });
+  const relatedRows = ranked
+    .filter((row) => Number(row.id) !== Number(code.id) && payloads.has(Number(row.id)))
+    .sort((a, b) => (b.popularity ?? -1) - (a.popularity ?? -1) || Number(b.id) - Number(a.id))
+    .slice(0, RELATED_CAP);
+  const relatedIds = new Set<number>();
+  for (const row of relatedRows) {
+    const payload = payloads.get(Number(row.id));
+    if (!payload) continue;
+    for (const objectId of collectObjectIds(payload)) relatedIds.add(objectId);
+  }
+  const [own] = await db<{ source: DetailSource; payload: unknown; synced_at: Date }[]>`
     SELECT source, payload, synced_at FROM loadout_details WHERE loadout_id = ${id}`;
-  const payload = row?.source === "ams" ? asPayload(row.payload) : null;
-  if (!row || !payload) return { code: shown, detail: null };
-  const ids = collectObjectIds(payload);
-  const quotes = ids.length
+  const payload = own?.source === "ams" ? asPayload(own.payload) : null;
+  const priceIds = new Set<number>(relatedIds);
+  if (payload) for (const objectId of collectObjectIds(payload)) priceIds.add(objectId);
+  const quotes = priceIds.size
     ? await db<{ object_id: number; price: number; priced_at: Date }[]>`
-        SELECT object_id, price, priced_at FROM loadout_item_prices WHERE source = 'ams' AND object_id IN ${sql(ids)}`
+        SELECT object_id, price, priced_at FROM loadout_item_prices WHERE source = 'ams' AND object_id IN ${sql([...priceIds])}`
     : [];
   const prices = new Map(quotes.map((quote) => [Number(quote.object_id), { price: quote.price, at: quote.priced_at.toISOString() }]));
+  const [mapped] = await db<{ object_id: string | number | null; pic: string | null; grade: number | null }[]>`
+    SELECT object_id, pic, grade FROM loadout_guns WHERE weapon = ${code.weapon}`;
+  const gun: LoadoutGunView = {
+    pic: playerhubPic(mapped?.pic ?? null) ?? playerhubPic(payload?.gun.pic ?? null),
+    grade: mapped ? asGrade(mapped.grade) : asGrade(payload?.gun.grade),
+    objectId: asId(mapped?.object_id) ?? payload?.gun.objectId ?? null,
+  };
+  const related: LoadoutRelatedView[] = relatedRows.map((row) => {
+    const view = presentCode(row);
+    const item = payloads.get(view.id)!;
+    const total = summarizePrices(item.gun.objectId, item.slots, prices).total;
+    return {
+      id: view.id,
+      name: item.name,
+      source: view.source,
+      popularityText: view.popularityText,
+      totalText: formatGamePrice(total),
+      pic: playerhubPic(item.previewPic) ?? playerhubPic(item.gun.pic) ?? gun.pic,
+    };
+  });
   return {
     code: shown,
-    detail: {
+    categoryLabel: categoryLabelOf(code.category_key),
+    gun,
+    siblings,
+    related,
+    detail: payload && own ? {
       source: payload.source,
       sourceLabel: "官方改枪台",
-      syncedAt: row.synced_at.toISOString(),
+      syncedAt: own.synced_at.toISOString(),
       name: payload.name,
-      previewPic: payload.previewPic,
-      gun: payload.gun,
+      previewPic: playerhubPic(payload.previewPic),
+      gun: { ...payload.gun, pic: playerhubPic(payload.gun.pic), grade: asGrade(payload.gun.grade) },
       properties: payload.properties,
-      slots: payload.slots.map((slot) => ({ ...slot, price: slot.objectId ? prices.get(slot.objectId)?.price ?? null : null })),
+      slots: payload.slots.map((slot) => ({ ...slot, pic: playerhubPic(slot.pic), price: slot.objectId ? prices.get(slot.objectId)?.price ?? null : null })),
       prices: summarizePrices(payload.gun.objectId, payload.slots, prices),
-    },
+    } : null,
   };
 }
 
@@ -326,19 +461,54 @@ interface StoredCode {
 
 export type { StoredCode };
 
-/** 列表上补整枪总价。价格还没齐的码留空，不拿方案标价冒充最新总价。 */
+function playerhubPic(url: string | null): string | null {
+  if (!url) return null;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:" || parsed.hostname !== "playerhub.df.qq.com") return null;
+    return url;
+  } catch {
+    return null;
+  }
+}
+
+function asId(value: unknown): number | null {
+  const n = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : NaN;
+  return Number.isSafeInteger(n) && n > 0 ? n : null;
+}
+
+function asGrade(value: unknown): number | null {
+  const n = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : NaN;
+  return Number.isInteger(n) && n >= 0 && n <= 6 ? n : null;
+}
+
+/** 列表上补整枪总价、配件缩略图和官方枪图。价格还没齐的码留空，不拿方案标价冒充最新总价。 */
 export async function priceLoadoutList(db: Db, categories: LoadoutCategoryView[]): Promise<LoadoutCategoryView[]> {
   const codes = categories.flatMap((category) => category.weapons.flatMap((weapon) => weapon.codes));
-  if (!codes.length) return categories;
+  const gunRows = await db<{ weapon: string; object_id: string | number | null; pic: string | null; grade: number | null }[]>`
+    SELECT weapon, object_id, pic, grade FROM loadout_guns`;
+  const gunByName = new Map(gunRows.map((row) => [row.weapon, row]));
+  if (!codes.length) {
+    return categories.map((category) => ({
+      ...category,
+      weapons: category.weapons.map((weapon) => decorateWeapon(weapon, gunByName, new Map())),
+    }));
+  }
   const ids = codes.map((code) => code.id);
   const details = await db<{ loadout_id: number; gun_object_id: number | null; payload: unknown }[]>`
     SELECT loadout_id, gun_object_id, payload FROM loadout_details WHERE source = 'ams' AND loadout_id IN ${sql(ids)}`;
   const objectIds = new Set<number>();
-  const byLoadout = new Map<number, { gunObjectId: number | null; slots: LoadoutSlot[] }>();
+  const byLoadout = new Map<number, { name: string | null; gunObjectId: number | null; gunPic: string | null; gunGrade: number | null; slots: LoadoutSlot[] }>();
   for (const row of details) {
     const payload = asPayload(row.payload);
     if (!payload) continue;
-    byLoadout.set(Number(row.loadout_id), { gunObjectId: row.gun_object_id ? Number(row.gun_object_id) : payload.gun.objectId, slots: payload.slots });
+    byLoadout.set(Number(row.loadout_id), {
+      name: payload.name,
+      gunObjectId: row.gun_object_id ? Number(row.gun_object_id) : payload.gun.objectId,
+      gunPic: playerhubPic(payload.gun.pic),
+      gunGrade: asGrade(payload.gun.grade),
+      slots: payload.slots,
+    });
     for (const id of collectObjectIds(payload)) objectIds.add(id);
   }
   const quotes = objectIds.size
@@ -348,13 +518,41 @@ export async function priceLoadoutList(db: Db, categories: LoadoutCategoryView[]
   const prices = new Map(quotes.map((quote) => [Number(quote.object_id), { price: quote.price, at: quote.priced_at.toISOString() }]));
   return categories.map((category) => ({
     ...category,
-    weapons: category.weapons.map((weapon) => ({
-      ...weapon,
-      codes: weapon.codes.map((code) => {
-        const detail = byLoadout.get(code.id);
-        const total = detail ? summarizePrices(detail.gunObjectId, detail.slots, prices).total : null;
-        return { ...code, totalText: formatGamePrice(total) };
-      }),
-    })),
+    weapons: category.weapons.map((weapon) => {
+      const shown = decorateWeapon(weapon, gunByName, byLoadout);
+      return {
+        ...shown,
+        codes: weapon.codes.map((code) => {
+          const detail = byLoadout.get(code.id);
+          const parts = detail
+            ? detail.slots.filter((slot) => slot.objectId).map((slot) => ({ name: slot.name, pic: playerhubPic(slot.pic), grade: asGrade(slot.grade) }))
+            : [];
+          const total = detail ? summarizePrices(detail.gunObjectId, detail.slots, prices).total : null;
+          return { ...code, total, totalText: formatGamePrice(total), name: detail?.name ?? null, partCount: parts.length, parts };
+        }),
+      };
+    }),
   }));
+}
+
+function decorateWeapon(
+  weapon: LoadoutCategoryView["weapons"][number],
+  gunByName: ReadonlyMap<string, { object_id: string | number | null; pic: string | null; grade: number | null }>,
+  byLoadout: ReadonlyMap<number, { gunObjectId: number | null; gunPic: string | null; gunGrade: number | null }>,
+): LoadoutCategoryView["weapons"][number] {
+  const mapped = gunByName.get(weapon.name);
+  let pic = playerhubPic(mapped?.pic ?? null);
+  let grade = mapped ? asGrade(mapped.grade) : null;
+  let objectId = mapped ? asId(mapped.object_id) : null;
+  if (!pic) {
+    for (const code of weapon.codes) {
+      const detail = byLoadout.get(code.id);
+      if (!detail?.gunPic) continue;
+      pic = detail.gunPic;
+      grade = grade ?? detail.gunGrade;
+      objectId = objectId ?? detail.gunObjectId;
+      break;
+    }
+  }
+  return { ...weapon, pic, grade, objectId };
 }

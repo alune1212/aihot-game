@@ -28,21 +28,46 @@ interface Slot {
   price: number | null;
 }
 
+interface Sibling {
+  id: number;
+  name: string | null;
+  mode: string | null;
+  source: string | null;
+  popularityText: string | null;
+  featured: boolean;
+  stale: boolean;
+  hasDetail: boolean;
+}
+
+interface Related {
+  id: number;
+  name: string | null;
+  source: string | null;
+  popularityText: string | null;
+  totalText: string | null;
+  pic: string | null;
+}
+
 interface Payload {
   game: { id: string; name: string };
   code: {
     id: number;
     weapon: string;
+    categoryKey: string;
     code: string;
     mode: string | null;
+    priceText: string | null;
     author: string | null;
     source: string | null;
     sourceUrl: string | null;
-    postedOn: string | null;
     popularityText: string | null;
     featured: boolean;
     stale: boolean;
   };
+  categoryLabel: string;
+  gun: { pic: string | null; grade: number | null; objectId: number | null };
+  siblings: Sibling[];
+  related: Related[];
   detail: {
     source: "ams";
     sourceLabel: string;
@@ -66,7 +91,7 @@ export function meta({ loaderData }: { loaderData?: Payload }) {
   const weapon = loaderData?.code.weapon ?? "改枪码";
   const name = loaderData?.game.name ?? "三角洲行动";
   return pageMeta({
-    title: `${weapon}改枪方案`,
+    title: `${loaderData?.detail?.name || weapon}改枪方案`,
     description: `${name} ${weapon} 的改枪方案，含配件、最新价格和改装前后属性。价格以游戏内交易行为准。`,
     path: loaderData ? `/loadouts/${loaderData.code.id}` : "/loadouts",
   });
@@ -83,25 +108,48 @@ const RADAR: Array<{ key: StatKey; label: string; scale: number }> = [
   { key: "fireSpeed", label: "射速", scale: 1200 },
 ];
 
-const TABLE: Array<{ key: StatKey; label: string }> = [
-  { key: "meatHarm", label: "基础伤害" },
-  { key: "armorHarm", label: "护甲伤害" },
-  { key: "fireSpeed", label: "射速" },
-  { key: "shootDistance", label: "优势射程" },
-  { key: "recoil", label: "后坐力控制" },
-  { key: "control", label: "操控速度" },
-  { key: "stable", label: "据枪稳定性" },
-  { key: "hipShot", label: "腰际射击精度" },
+const BARS: Array<{ key: StatKey; label: string; scale: number }> = [
+  { key: "meatHarm", label: "基础伤害", scale: 100 },
+  { key: "armorHarm", label: "对甲伤害", scale: 100 },
+  { key: "shootDistance", label: "有效射程", scale: 100 },
+  { key: "recoil", label: "后坐力控制", scale: 100 },
+  { key: "control", label: "操控速度", scale: 100 },
+  { key: "stable", label: "据枪稳定性", scale: 100 },
+  { key: "hipShot", label: "腰际射击精度", scale: 100 },
+  { key: "fireSpeed", label: "射速", scale: 1000 },
 ];
 
+function playerhubPic(url: string | null | undefined): string | null {
+  if (!url) return null;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:" || parsed.hostname !== "playerhub.df.qq.com") return null;
+    return url;
+  } catch {
+    return null;
+  }
+}
+
+/** 0 和 1 是普通品质，用中性色，不套绿蓝紫金红。 */
 function gradeColor(grade: number | null): string {
   switch (grade) {
-    case 2: return "var(--ok)";
-    case 3: return "#3b82d6";
-    case 4: return "#8b5cf6";
-    case 5: return "var(--amber)";
-    case 6: return "var(--hot)";
-    default: return "var(--line)";
+    case 2: return "#3dd68c";
+    case 3: return "#4c9aff";
+    case 4: return "#b57bff";
+    case 5: return "#f0c14a";
+    case 6: return "#ff5d5d";
+    default: return "#c5ceda";
+  }
+}
+
+function gradeWell(grade: number | null): string {
+  switch (grade) {
+    case 2: return "radial-gradient(ellipse at center,#1c4030 0%,#121820 72%)";
+    case 3: return "radial-gradient(ellipse at center,#1a3050 0%,#121820 72%)";
+    case 4: return "radial-gradient(ellipse at center,#321c4a 0%,#121820 72%)";
+    case 5: return "radial-gradient(ellipse at center,#403418 0%,#121820 72%)";
+    case 6: return "radial-gradient(ellipse at center,#4a2020 0%,#121820 72%)";
+    default: return "radial-gradient(ellipse at center,#2a3548 0%,#121820 72%)";
   }
 }
 
@@ -118,176 +166,146 @@ function signed(value: number): string {
   return String(value);
 }
 
-function CopyCode({ code }: { code: string }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <button
-      type="button"
-      className="shrink-0 rounded-full border border-line px-2.5 py-1 text-[12px] text-ink-3 hover:text-ink"
-      onClick={() => {
-        void copyText(code).then(() => {
-          setCopied(true);
-          setTimeout(() => setCopied(false), 1200);
-        });
-      }}
-    >
-      {copied ? "已复制" : "复制"}
-    </button>
-  );
-}
-
 function point(index: number, value: number, scale: number, radius: number): [number, number] {
   const angle = -Math.PI / 2 + (index / RADAR.length) * Math.PI * 2;
   const length = Math.max(0, Math.min(1, value / scale)) * radius;
-  return [160 + Math.cos(angle) * length, 160 + Math.sin(angle) * length];
+  return [100 + Math.cos(angle) * length, 100 + Math.sin(angle) * length];
 }
 
 function polygon(stats: Stats, radius: number): string {
   return RADAR.map((axis, index) => point(index, stats[axis.key], axis.scale, radius).join(",")).join(" ");
 }
 
-function SeriesKey({ dashed, label }: { dashed: boolean; label: string }) {
-  return (
-    <span className="inline-flex items-center gap-1.5 text-ink-2">
-      <svg width="28" height="10" aria-hidden="true">
-        <line x1="1" y1="5" x2="27" y2="5" stroke={dashed ? "var(--ink-3)" : "var(--accent)"} strokeWidth={dashed ? 1.75 : 2.75} strokeDasharray={dashed ? "4 3" : undefined} />
-      </svg>
-      {label}
-    </span>
-  );
+function pct(value: number, scale: number): number {
+  if (!Number.isFinite(value) || scale <= 0) return 0;
+  return Math.max(0, Math.min(100, (value / scale) * 100));
 }
 
-function Radar({ origin, change }: { origin: Stats; change: Stats | null }) {
-  const rings = [0.25, 0.5, 0.75, 1];
-  const after = change
-    ? (Object.fromEntries(TABLE.map((row) => [row.key, origin[row.key] + change[row.key]])) as Stats)
-    : null;
-  return (
-    <figure className="rounded-card border border-line bg-surface p-3">
-      <figcaption className="flex flex-wrap items-center justify-between gap-2 text-[12px]">
-        <span className="text-ink-3">改装前后</span>
-        <span className="flex gap-4">
-          <SeriesKey dashed label="改装前" />
-          {after ? <SeriesKey dashed={false} label="改装后" /> : null}
-        </span>
-      </figcaption>
-      <svg viewBox="0 0 320 320" role="img" aria-labelledby="radar-title" className="mx-auto mt-1 w-full max-w-[320px]">
-        <title id="radar-title">改装前后的枪械属性雷达图。虚线是改装前，实心品牌色是改装后。数值见旁边的表。射速按 1200 发/分折到外圈。</title>
-        {rings.map((ring) => (
-          <polygon key={ring} points={polygon({ meatHarm: 100 * ring, armorHarm: 100 * ring, shootDistance: 100 * ring, recoil: 100 * ring, control: 100 * ring, stable: 100 * ring, hipShot: 100 * ring, fireSpeed: 1200 * ring }, 104)} fill="none" stroke="var(--line-strong)" />
-        ))}
-        {RADAR.map((axis, index) => {
-          const [x, y] = point(index, axis.scale, axis.scale, 104);
-          const [lx, ly] = point(index, axis.scale, axis.scale, 126);
-          return (
-            <g key={axis.key}>
-              <line x1="160" y1="160" x2={x} y2={y} stroke="var(--line-strong)" />
-              <text x={lx} y={ly} textAnchor="middle" dominantBaseline="middle" fill="var(--ink-3)" fontSize="11">{axis.label}</text>
-            </g>
-          );
-        })}
-        <polygon points={polygon(origin, 104)} fill="none" stroke="var(--ink-3)" strokeWidth="1.75" strokeDasharray="5 4" />
-        {after ? <polygon points={polygon(after, 104)} fill="color-mix(in srgb, var(--accent) 32%, transparent)" stroke="var(--accent)" strokeWidth="2.75" /> : null}
-      </svg>
-      <p className="text-center text-[11px] text-ink-4">虚线是改装前，实心是改装后。射速按 1200 发/分折到外圈，其余属性按 100。增加用品牌色，减少用红色，和右边的表一致。</p>
-    </figure>
-  );
-}
-
-function AttributeTable({ properties }: { properties: NonNullable<Payload["detail"]>["properties"] }) {
-  if (!properties) return <p className="rounded-card border border-line bg-surface px-4 py-6 text-[13px] text-ink-4">还没有这把枪的属性。</p>;
-  const rows: Array<{ label: string; before: string; after: string; delta: string | null }> = TABLE.map((row) => {
-    const before = properties.origin[row.key];
-    const delta = properties.change ? properties.change[row.key] : null;
-    return {
-      label: row.label,
-      before: String(before),
-      after: delta === null ? "—" : String(before + delta),
-      delta: delta === null ? null : signed(delta),
-    };
-  });
-  rows.splice(3, 0, { label: "开火模式", before: properties.fireMode ?? "—", after: "—", delta: null });
-  rows.push(
-    { label: "枪口初速", before: properties.muzzleVelocity === null ? "—" : String(properties.muzzleVelocity), after: "—", delta: null },
-    { label: "弹匣容量", before: properties.capacity === null ? "—" : String(properties.capacity), after: "—", delta: null },
-  );
-  return (
-    <div className="overflow-hidden rounded-card border border-line bg-surface">
-      <table className="w-full text-left text-[13px]">
-        <caption className="sr-only">改装前后的枪械属性</caption>
-        <thead className="text-[12px] text-ink-4">
-          <tr className="border-b border-line-soft">
-            <th scope="col" className="px-3 py-2 font-medium">属性</th>
-            <th scope="col" className="px-3 py-2 text-right font-medium">改装前</th>
-            <th scope="col" className="px-3 py-2 text-right font-medium">改装后</th>
-            <th scope="col" className="px-3 py-2 text-right font-medium">增减</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={row.label} className="border-b border-line-soft last:border-0">
-              <th scope="row" className="px-3 py-2 font-normal text-ink">{row.label}</th>
-              <td className="num px-3 py-2 text-right text-ink-3">{row.before}</td>
-              <td className={`num px-3 py-2 text-right ${row.after === "—" ? "text-ink-4" : "font-medium text-accent"}`}>{row.after}</td>
-              <td className={`num px-3 py-2 text-right font-medium ${row.delta === null || row.delta === "0" ? "font-normal text-ink-4" : row.delta.startsWith("+") ? "text-accent" : "text-hot"}`}>{row.delta ?? "—"}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <p className="border-t border-line-soft px-3 py-2 text-[12px] text-ink-4">改装后用品牌色，增加同样用品牌色，减少用红色。枪口初速和开火模式官方只给了原枪数值，增减看配件效果。</p>
-    </div>
-  );
+function schemeLabel(name: string | null, mode: string | null): string {
+  return name || mode || "方案";
 }
 
 export default function LoadoutDetailPage() {
-  const { code, detail } = useLoaderData<typeof loader>();
+  const { code, categoryLabel, gun, siblings, related, detail } = useLoaderData<typeof loader>();
   const title = detail?.name || code.weapon;
-  const picture = detail?.previewPic || detail?.gun.pic || null;
+  const crumb = detail?.name || (code.source ? `${code.source}方案` : "改枪方案");
+  const picture = playerhubPic(detail?.previewPic) || playerhubPic(detail?.gun.pic) || playerhubPic(gun.pic);
+  const grade = detail ? detail.gun.grade : gun.grade;
+  const listCategory = `/loadouts?category=${encodeURIComponent(code.categoryKey)}`;
+  const listGun = `${listCategory}&gun=${encodeURIComponent(code.weapon)}`;
+  const installed = detail?.slots.filter((slot) => slot.objectId) ?? [];
+  const updatedAt = detail ? beijingStamp(detail.prices.pricedAt ?? detail.syncedAt) : null;
   return (
     <div className="pb-10">
-      <PhoneBar back={{ to: "/loadouts", label: "改枪码" }} title={title} />
-      <p className="hidden pt-1 lg:block"><a href="/loadouts" className="text-[13px] text-ink-3 hover:text-ink">返回改枪码</a></p>
-      <header className="grid gap-4 pt-3 sm:grid-cols-[180px_minmax(0,1fr)] sm:items-center lg:pt-4">
-        <div className="flex h-36 items-center justify-center overflow-hidden rounded-card border border-line bg-surface">
+      <PhoneBar back={{ to: listGun, label: code.weapon }} title={title} />
+      <nav aria-label="面包屑" className="flex flex-wrap items-center gap-x-2 gap-y-1 pt-3 text-[13px] text-ink-3 lg:pt-1">
+        <a href="/loadouts" className="hover:text-accent">改枪码</a>
+        <span aria-hidden="true">/</span>
+        <a href={listCategory} className="hover:text-accent">{categoryLabel}</a>
+        <span aria-hidden="true">/</span>
+        <a href={listGun} className="hover:text-accent">{code.weapon}</a>
+        <span aria-hidden="true">/</span>
+        <span className="font-semibold text-ink" aria-current="page">{crumb}</span>
+      </nav>
+      {siblings.length > 1 ? (
+        <nav aria-label="同枪方案" className="mt-3 flex flex-wrap gap-2">
+          {siblings.map((item) => {
+            const on = item.id === code.id;
+            return (
+              <a
+                key={item.id}
+                href={`/loadouts/${item.id}`}
+                aria-current={on ? "page" : undefined}
+                className={`max-w-full truncate rounded-control border px-3 py-1.5 text-[13px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${on ? "border-accent bg-accent-soft font-semibold text-accent-ink" : "border-line bg-surface text-ink-2 hover:text-ink"}`}
+              >
+                {schemeLabel(item.name, item.mode)}
+              </a>
+            );
+          })}
+        </nav>
+      ) : null}
+      <section className="mt-4 grid items-stretch gap-4 lg:grid-cols-2">
+        <div className="relative flex min-h-[220px] items-center justify-center overflow-hidden rounded-panel border border-line bg-[radial-gradient(ellipse_at_center,#243044_0%,#10141c_70%)] px-4">
           {picture
-            ? <img src={picture} alt={detail?.gun.name ?? code.weapon} width={280} height={140} fetchPriority="high" decoding="async" className="h-full w-full object-contain" />
-            : <span className="text-[13px] text-ink-4">暂无枪图</span>}
+            ? <img src={picture} alt="" width={640} height={240} fetchPriority="high" decoding="async" className="max-h-[240px] max-w-full object-contain drop-shadow-[0_10px_18px_rgba(0,0,0,0.45)]" />
+            : <span className="text-[14px] text-[#c5ceda]">暂无官方图</span>}
+          <span className="absolute inset-x-0 bottom-0 h-1" style={{ background: gradeColor(grade) }} />
         </div>
-        <div className="min-w-0">
-          <h1 data-page-title="" className="text-[24px] font-semibold leading-[1.3] text-ink">{title}</h1>
-          <p className="mt-1 text-[13px] text-ink-3">{[code.weapon, code.mode, code.author, code.popularityText].filter(Boolean).join(" · ")}{code.featured ? " · 主播" : ""}{code.stale ? " · 过季" : ""}</p>
-          <div className="mt-3 flex items-start gap-2">
-            <p className="min-w-0 break-all font-mono text-[13px] text-ink">{code.code}</p>
+        <div className="flex min-w-0 flex-col gap-2.5 py-1">
+          <h1 data-page-title="" className="text-[26px] font-extrabold leading-tight text-ink">{title}</h1>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {code.mode ? <span className="rounded-mark border border-[#31465f] bg-[#172232] px-1.5 py-0.5 text-[12px] text-[#d6e6ff]">{code.mode}</span> : null}
+            {code.source ? (
+              code.sourceUrl
+                ? <a href={code.sourceUrl} className="rounded-mark border border-line px-1.5 py-0.5 text-[12px] font-semibold text-ink-2 hover:text-accent">{code.source}</a>
+                : <span className={`rounded-mark px-1.5 py-0.5 text-[12px] font-semibold ${code.source === "官方热门" ? "bg-ok-soft text-ok-ink" : "border border-line text-ink-2"}`}>{code.source}</span>
+            ) : null}
+            {code.featured ? <span className="rounded-mark bg-amber-soft px-1.5 py-0.5 text-[12px] font-semibold text-amber-ink">主播</span> : null}
+            {code.stale ? <span className="rounded-mark border border-line px-1.5 py-0.5 text-[12px] text-ink-4">过季</span> : null}
+          </div>
+          {detail ? (
+            <p className="text-[13px] text-ink-3">
+              {code.author ? <>作者 <strong className="font-semibold text-ink">{code.author}</strong></> : null}
+              {code.popularityText ? <span>{code.author ? " · " : ""}{code.popularityText}</span> : null}
+            </p>
+          ) : (
+            <p className="num text-[28px] font-extrabold leading-none text-amber">{code.priceText ?? "—"}</p>
+          )}
+          {detail ? null : <p className="text-[12px] text-ink-4">{code.priceText ? "来源价 · " : ""}以游戏内交易行为准</p>}
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
+            <p className="min-w-0 flex-1 break-all rounded-control border border-line bg-bg-sunk px-3 py-2.5 font-mono text-[13px] leading-snug text-ink">{code.code}</p>
             <CopyCode code={code.code} />
           </div>
-          <p className="mt-2 text-[12px] text-ink-4">
-            {detail ? <>数据来自{detail.sourceLabel} · 更新于 {beijingStamp(detail.syncedAt)}</> : "暂无官方详情"}
-            {code.source ? <> · 码的来源 {code.sourceUrl ? <a href={code.sourceUrl} className="text-accent hover:underline">{code.source}</a> : code.source}</> : null}
-            {code.postedOn ? ` · ${code.postedOn}` : ""}
-          </p>
+          {detail ? (
+            <>
+              <dl className="grid grid-cols-3 gap-2">
+                <div className="rounded-tile border border-line bg-surface px-3 py-2.5">
+                  <dt className="text-[12px] text-ink-3">配件合计</dt>
+                  <dd className="num mt-1 text-[18px] font-extrabold text-amber">{money(detail.prices.parts)}</dd>
+                </div>
+                <div className="rounded-tile border border-line bg-surface px-3 py-2.5">
+                  <dt className="text-[12px] text-ink-3">枪身</dt>
+                  <dd className="num mt-1 text-[18px] font-extrabold text-amber">{money(detail.prices.gun)}</dd>
+                </div>
+                <div className="rounded-tile border border-ok bg-ok-soft px-3 py-2.5">
+                  <dt className="text-[12px] text-ink-3">整枪总价</dt>
+                  <dd className="num mt-1 text-[22px] font-extrabold leading-none text-amber sm:text-[26px]">{money(detail.prices.total)}</dd>
+                </div>
+              </dl>
+              <p className="text-[12px] text-ink-4">以游戏内交易行为准 · 更新于 {updatedAt}（北京时间）{detail.prices.complete ? "" : " · 有的配件还没有价格，总价先不算"}</p>
+            </>
+          ) : (
+            <p className="rounded-tile border border-line bg-surface px-3 py-2.5 text-[13px] leading-relaxed text-ink">
+              <strong className="font-semibold">暂无官方配件详情，可在游戏内改枪台导入查看。</strong>
+              <span className="mt-1 block text-ink-3">这条码还没对上官方方案，配件、属性和交易行价格先留空。</span>
+            </p>
+          )}
         </div>
-      </header>
+      </section>
       {detail ? (
         <>
-          <div className="mt-6 grid items-start gap-4 lg:grid-cols-2">
-            {detail.properties ? <Radar origin={detail.properties.origin} change={detail.properties.change} /> : <p className="rounded-card border border-line bg-surface px-4 py-6 text-[13px] text-ink-4">官方方案里没有这把枪的属性。</p>}
-            <AttributeTable properties={detail.properties} />
+          <h2 className="mt-6 text-[14px] font-bold text-ink">枪械属性 <span className="ml-1 text-[12px] font-medium text-ink-3">改装前 / 改装后</span></h2>
+          <div className="mt-3 grid items-center gap-4 rounded-panel border border-line bg-surface p-4 lg:grid-cols-[220px_minmax(0,1fr)]">
+            {detail.properties ? <Radar origin={detail.properties.origin} change={detail.properties.change} /> : <p className="text-[13px] text-ink-3">官方方案里没有这把枪的属性。</p>}
+            <AttributeBars properties={detail.properties} />
           </div>
-          <h2 className="mt-8 text-[15px] font-bold text-ink">配件</h2>
-          {detail.slots.length ? (
-            <ul className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
-              {detail.slots.map((slot) => (
-                <li key={slot.slotId} className="rounded-card border bg-surface p-2.5" style={{ borderColor: slot.objectId ? gradeColor(slot.grade) : "var(--line)" }}>
-                  <div className="flex h-16 items-center justify-center">
-                    {slot.pic ? <img src={slot.pic} alt="" width={64} height={64} loading="lazy" decoding="async" className="h-16 w-16 object-contain" /> : <span className="text-[12px] text-ink-4">{slot.objectId ? "无图" : "空"}</span>}
+          <h2 className="mt-6 text-[14px] font-bold text-ink">配件详情 <span className="ml-1 text-[12px] font-medium text-ink-3">{installed.length} 件 · 官方交易行均价</span></h2>
+          {installed.length ? (
+            <ul className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
+              {installed.map((slot) => (
+                <li key={slot.slotId} className="flex flex-col gap-1.5 rounded-card border-2 bg-surface p-3" style={{ borderColor: gradeColor(slot.grade) }}>
+                  <p className="text-[12px] font-semibold text-[#24527f] dark:text-[#9ec0ff]">{slot.slotName}</p>
+                  <div className="grid h-[88px] place-items-center rounded-control border-2 p-2" style={{ background: gradeWell(slot.grade), borderColor: gradeColor(slot.grade) }}>
+                    {slot.pic
+                      ? <img src={slot.pic} alt={slot.name ?? slot.slotName} width={120} height={72} loading="lazy" fetchPriority="low" decoding="async" className="max-h-[72px] max-w-full object-contain [filter:brightness(1.15)_drop-shadow(0_2px_6px_rgba(0,0,0,0.45))]" />
+                      : <span className="text-[12px] text-[#c5ceda]">无图</span>}
                   </div>
-                  <p className="mt-1 text-[11px] text-ink-4">{slot.slotName}</p>
-                  <p className="text-[13px] font-medium leading-snug text-ink">{slot.name ?? "未安装"}</p>
-                  <p className="num mt-1 text-[12px] text-ink-3">{slot.objectId ? money(slot.price) : "—"}</p>
+                  <p className="min-h-[2.4em] text-[13px] font-bold leading-snug text-ink">{slot.name ?? "未命名配件"}</p>
+                  <p className="text-[12px] text-ink-3">单价 <span className="num font-bold text-amber">{money(slot.price)}</span></p>
                   {slot.effects.length ? (
-                    <ul className="mt-1 space-y-0.5">
+                    <ul className="mt-0.5 space-y-0.5">
                       {slot.effects.map((effect) => (
-                        <li key={effect.value} className="text-[11px] leading-snug" style={{ color: effect.color === "green" ? "var(--ok)" : "var(--hot)" }}>{effect.value}</li>
+                        <li key={effect.value} className={`text-[12px] leading-snug ${effect.color === "green" ? "text-ok" : "text-hot"}`}>{effect.value}</li>
                       ))}
                     </ul>
                   ) : null}
@@ -295,35 +313,122 @@ export default function LoadoutDetailPage() {
               ))}
             </ul>
           ) : (
-            <p className="mt-2 text-[13px] text-ink-4">官方方案里没有配件。</p>
+            <p className="mt-3 text-[13px] text-ink-3">官方方案里没有已安装的配件。</p>
           )}
-          <section className="mt-6 rounded-card border border-line bg-surface px-4 py-3 text-[13px]" aria-label="价格">
-            <dl className="grid grid-cols-3 gap-3">
-              <div>
-                <dt className="text-[12px] text-ink-4">配件合计</dt>
-                <dd className="num mt-0.5 text-[18px] font-semibold text-ink">{money(detail.prices.parts)}</dd>
-              </div>
-              <div>
-                <dt className="text-[12px] text-ink-4">枪身</dt>
-                <dd className="num mt-0.5 text-[18px] font-semibold text-ink">{money(detail.prices.gun)}</dd>
-              </div>
-              <div>
-                <dt className="text-[12px] text-ink-4">整枪总价</dt>
-                <dd className="num mt-0.5 text-[18px] font-semibold text-ink">{money(detail.prices.total)}</dd>
-              </div>
-            </dl>
-            <p className="mt-3 text-[12px] leading-relaxed text-ink-4">
-              {detail.prices.pricedAt ? `价格更新于 ${beijingStamp(detail.prices.pricedAt)}。` : "价格还没刷新。"}
-              {detail.prices.complete ? "" : "有的配件还没有价格，总价先不算。"}
-              以游戏内交易行为准。
-            </p>
-          </section>
         </>
-      ) : (
-        <p className="mt-6 rounded-card border border-dashed border-line-strong px-4 py-8 text-[13px] leading-relaxed text-ink-3">
-          暂无官方详情。官方改枪台还没对上这条码；查到之前这里留空。上次已经成功的方案会继续显示当时的数据和更新时间。
-        </p>
-      )}
+      ) : related.length ? (
+        <section className="mt-8" aria-labelledby="related-title">
+          <h2 id="related-title" className="text-[14px] font-bold text-ink">同枪官方热门方案</h2>
+          <ul className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-3">
+            {related.map((item) => {
+              const pic = playerhubPic(item.pic);
+              return (
+                <li key={item.id}>
+                  <a href={`/loadouts/${item.id}`} className="block rounded-card border border-line bg-surface p-3 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
+                    <span className="flex h-[88px] items-center justify-center rounded-control bg-[radial-gradient(ellipse_at_center,#243044_0%,#10141c_72%)]">
+                      {pic ? <img src={pic} alt="" width={160} height={72} loading="lazy" decoding="async" className="max-h-[72px] max-w-full object-contain" /> : <span className="text-[12px] text-[#c5ceda]">暂无官方图</span>}
+                    </span>
+                    <span className="mt-2 block truncate text-[14px] font-semibold text-ink">{item.name || "改枪方案"}</span>
+                    <span className="mt-1 flex items-center justify-between gap-2 text-[12px]">
+                      {item.source ? <span className={`rounded-mark px-1.5 py-0.5 font-semibold ${item.source === "官方热门" ? "bg-ok-soft text-ok-ink" : "border border-line text-ink-2"}`}>{item.source}</span> : <span />}
+                      <span className="num font-bold text-amber">{item.totalText ?? "—"}</span>
+                    </span>
+                    {item.popularityText ? <span className="mt-1 block text-[12px] text-ink-3">{item.popularityText}</span> : null}
+                  </a>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      ) : null}
+    </div>
+  );
+}
+
+function CopyCode({ code }: { code: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      className="shrink-0 rounded-control bg-accent px-4 py-2.5 text-[14px] font-bold text-accent-contrast focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+      onClick={() => {
+        void copyText(code).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1200);
+        });
+      }}
+    >
+      {copied ? "已复制" : "复制改枪码"}
+    </button>
+  );
+}
+
+function Radar({ origin, change }: { origin: Stats; change: Stats | null }) {
+  const rings = [0.25, 0.5, 0.75, 1];
+  const after = change
+    ? (Object.fromEntries(RADAR.map((row) => [row.key, origin[row.key] + change[row.key]])) as Stats)
+    : null;
+  return (
+    <figure>
+      <svg viewBox="0 0 200 200" role="img" aria-labelledby="radar-title" className="mx-auto w-full max-w-[220px]">
+        <title id="radar-title">改装前后的枪械属性雷达图。虚线是改装前，实心品牌色是改装后。射速按 1200 发/分折到外圈，其余属性按 100。</title>
+        {rings.map((ring) => (
+          <polygon key={ring} points={polygon({ meatHarm: 100 * ring, armorHarm: 100 * ring, shootDistance: 100 * ring, recoil: 100 * ring, control: 100 * ring, stable: 100 * ring, hipShot: 100 * ring, fireSpeed: 1200 * ring }, 68)} fill="none" stroke="var(--line-strong)" />
+        ))}
+        {RADAR.map((axis, index) => {
+          const [x, y] = point(index, axis.scale, axis.scale, 68);
+          const [lx, ly] = point(index, axis.scale, axis.scale, 84);
+          return (
+            <g key={axis.key}>
+              <line x1="100" y1="100" x2={x} y2={y} stroke="var(--line)" />
+              <text x={lx} y={ly} textAnchor="middle" dominantBaseline="middle" fill="var(--ink-3)" fontSize="10">{axis.label}</text>
+            </g>
+          );
+        })}
+        <polygon points={polygon(origin, 68)} fill="none" stroke="var(--ink-3)" strokeWidth="1.6" strokeDasharray="4 3" />
+        {after ? <polygon points={polygon(after, 68)} fill="color-mix(in srgb, var(--accent) 28%, transparent)" stroke="var(--accent)" strokeWidth="2.2" /> : null}
+      </svg>
+      <figcaption className="mt-1 flex justify-center gap-4 text-[12px] text-ink-2">
+        <span className="inline-flex items-center gap-1.5"><svg width="18" height="8" aria-hidden="true"><line x1="0" y1="4" x2="18" y2="4" stroke="var(--ink-3)" strokeWidth="1.6" strokeDasharray="4 3" /></svg>改装前</span>
+        <span className="inline-flex items-center gap-1.5"><svg width="18" height="8" aria-hidden="true"><line x1="0" y1="4" x2="18" y2="4" stroke="var(--accent)" strokeWidth="2.2" /></svg>改装后</span>
+      </figcaption>
+    </figure>
+  );
+}
+
+function AttributeBars({ properties }: { properties: NonNullable<Payload["detail"]>["properties"] }) {
+  if (!properties) return <p className="text-[13px] text-ink-3">还没有这把枪的属性。</p>;
+  const extra = [
+    properties.fireMode ? `射击模式 ${properties.fireMode}` : null,
+    properties.capacity != null ? `弹匣容量 ${properties.capacity}` : null,
+    properties.muzzleVelocity != null ? `初速 ${properties.muzzleVelocity}` : null,
+  ].filter(Boolean);
+  return (
+    <div className="flex flex-col gap-2.5">
+      {BARS.map((row) => {
+        const before = properties.origin[row.key];
+        const delta = properties.change ? properties.change[row.key] : 0;
+        const after = before + delta;
+        const base = pct(before, row.scale);
+        const next = pct(after, row.scale);
+        const label = `${row.label}，改装后 ${after}${delta ? `，${signed(delta)}` : ""}`;
+        return (
+          <div key={row.key} className="grid grid-cols-[5.5rem_minmax(0,1fr)_4.5rem] items-center gap-2" role="group" aria-label={label}>
+            <span className="text-[12px] text-ink-3">{row.label}</span>
+            <span className="relative h-2.5 overflow-hidden rounded-full bg-bg-muted" aria-hidden="true">
+              <span className="absolute inset-y-0 left-0 rounded-full bg-[#8a93a8]/80" style={{ width: `${base}%` }} />
+              {delta > 0 ? <span className="absolute inset-y-0 rounded-full bg-accent" style={{ left: `${base}%`, width: `${Math.max(0, next - base)}%` }} /> : null}
+              {delta < 0 ? <span className="absolute inset-y-0 rounded-full bg-hot" style={{ left: `${next}%`, width: `${Math.max(0, base - next)}%` }} /> : null}
+            </span>
+            <span className="num text-right text-[13px] font-bold text-ink">
+              {after}
+              {delta > 0 ? <span className="ml-1 text-accent">{signed(delta)}</span> : null}
+              {delta < 0 ? <span className="ml-1 text-hot">{signed(delta)}</span> : null}
+            </span>
+          </div>
+        );
+      })}
+      {extra.length ? <p className="border-t border-line pt-2 text-[12px] text-ink-3">{extra.join(" · ")}</p> : null}
     </div>
   );
 }
