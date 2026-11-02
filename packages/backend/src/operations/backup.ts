@@ -3,8 +3,8 @@
 // one retention prefix: monthly/ on the 1st, otherwise weekly/ on Sundays or daily/.
 import { execFile } from "node:child_process";
 import { createHash, createHmac } from "node:crypto";
-import { createReadStream } from "node:fs";
-import { mkdir, readdir, rm, stat } from "node:fs/promises";
+import { constants, createReadStream } from "node:fs";
+import { access, mkdir, readdir, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { beijingDate, beijingWeekday } from "@aihot/contracts/time";
@@ -140,10 +140,23 @@ export async function rotateLocalBackups(dir: string, keepDays: number, now = ne
  * One custom-format dump per Beijing day in DB_BACKUP_LOCAL_DIR, kept about DB_BACKUP_LOCAL_KEEP_DAYS.
  * Off unless DB_BACKUP_LOCAL=true. Does not upload anywhere.
  */
+async function assertLocalBackupWritable(dir: string): Promise<void> {
+  try {
+    await mkdir(dir, { recursive: true });
+    await access(dir, constants.W_OK);
+  } catch (error: unknown) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "EACCES" || code === "EPERM") {
+      throw new Error(`local backup cannot write to ${dir}: this process cannot create files there. On Linux Docker, ./backups is created root-owned; the backup-dir service chowns it to the node user (uid 1000). Otherwise: mkdir -p backups && sudo chown 1000:1000 backups`);
+    }
+    throw error;
+  }
+}
+
 export async function runLocalBackup(now = new Date(), env: NodeJS.ProcessEnv = process.env) {
   if (!localBackupConfigured(env)) return null;
   const dir = localBackupDir(env);
-  await mkdir(dir, { recursive: true });
+  await assertLocalBackupWritable(dir);
   const name = sql.options.database.toLowerCase().replace(/[^a-z0-9]+/g, "-");
   const dump = path.join(dir, `${name}-${beijingDate(now)}.dump`);
   await dumpDatabase(dump);

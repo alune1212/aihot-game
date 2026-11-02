@@ -304,7 +304,9 @@ MCP 的 `subscriptions/listen` 现在立即返回 HTTP 404 和 JSON-RPC `-32601 
 
 恢复时同时取回这一对文件（只有 `.dump` 的就只恢复数据库）：使用与数据库版本兼容的 `pg_restore` 将 `.dump` 恢复到空数据库，再把文件包解压到数据目录根目录（Docker 中为 `/data`，非 Docker 使用 `AIHOT_DATA_DIR`，默认 `.data`），保留包内的子目录结构，并确保运行进程可读取这些文件。只恢复数据库不能找回仍由 `local:` 引用的反馈截图；旧备份中没有包含的文件也无法凭数据库引用恢复。
 
-单机 Mac 上如果不想配对象存储，可以用本地目录备份。默认关着。在 `.env` 里写 `DB_BACKUP_LOCAL=true` 后，worker 每天 04:10（上海时间）往 `DB_BACKUP_LOCAL_DIR` 放一份 custom 格式的 `pg_dump`。compose 把容器里的 `/var/backups/aihot` 挂到宿主机仓库下的 `backups/`。大约保留 14 天（`DB_BACKUP_LOCAL_KEEP_DAYS`）。这不上传，也不代替上面的对象存储备份；两个都开着就会各做一份。
+单机上如果不想配对象存储，可以用本地目录备份。默认关着。在 `.env` 里写 `DB_BACKUP_LOCAL=true` 后，worker 每天 04:10（上海时间）往 `DB_BACKUP_LOCAL_DIR` 放一份 custom 格式的 `pg_dump`。compose 把容器里的 `/var/backups/aihot` 挂到宿主机仓库下的 `backups/`。大约保留 14 天（`DB_BACKUP_LOCAL_KEEP_DAYS`）。这不上传，也不代替上面的对象存储备份；两个都开着就会各做一份。
+
+Linux 上如果 `backups/` 还不存在，Docker 会把它建成 root 所有，而 worker 以 `node`（uid 1000）运行，`pg_dump` 写不进去。`docker compose up` 会先跑 `backup-dir`：目录已经能被 node 写（macOS 上现在就是这样）就不动它，否则把属主改成 node。不用 compose、自己起容器时，先在宿主机执行 `mkdir -p backups && sudo chown 1000:1000 backups`。目录仍然不可写时，备份任务会失败并写明这个目录和上面的命令，不会只留一句 `pg_dump` 的权限错误。
 
 恢复前先停掉会写库的进程，再把某一天的文件灌回。文件名里的日期是北京时间：
 

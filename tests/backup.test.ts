@@ -363,6 +363,20 @@ test("a real dump preserves libpq query parameter escaping", async () => {
   finally { config.databaseUrl = originalUrl; }
 });
 
+test("local backup names an unwritable directory instead of failing inside pg_dump", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "aihot-local-backup-ro-"));
+  roots.push(dir);
+  await chmod(dir, 0o555);
+  try {
+    await assert.rejects(
+      runLocalBackup(NOW, { ...process.env, DB_BACKUP_LOCAL: "true", DB_BACKUP_LOCAL_DIR: dir }),
+      /cannot write to/,
+    );
+  } finally {
+    await chmod(dir, 0o755);
+  }
+});
+
 test("local backups stay off unless asked, and old dumps in that folder are removed", async () => {
   assert.equal(await runLocalBackup(NOW, { ...process.env, DB_BACKUP_LOCAL: "false" }), null);
   const dir = await mkdtemp(path.join(tmpdir(), "aihot-local-backup-"));
