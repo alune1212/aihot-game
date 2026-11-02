@@ -229,15 +229,17 @@ export default function LoadoutsPage() {
                 const on = weapon.name === selected?.name;
                 const pic = playerhubPic(weapon.pic);
                 return (
+                  // 同一行里有的卡片多一行理论 TTK，网格会把矮的 button 拉高。
+                  // 按钮的默认排版会把内容垂直居中，图片区就离开卡片顶，顶上露出卡片底色。
                   <button
                     key={weapon.name}
                     id={cardId(weapon.name)}
                     type="button"
                     aria-pressed={on}
-                    className={`overflow-hidden rounded-card border bg-surface text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${on ? "border-accent shadow-[0_0_0_1px_var(--accent)]" : "border-line"}`}
+                    className={`flex w-full flex-col overflow-hidden rounded-card border bg-surface text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${on ? "border-accent shadow-[0_0_0_1px_var(--accent)]" : "border-line"}`}
                     onClick={() => patch({ gun: weapon.name })}
                   >
-                    <span className="gun-well relative flex h-[110px] items-center justify-center px-3" style={wellStyle(weapon.grade)}>
+                    <span className="gun-well relative flex h-[110px] shrink-0 items-center justify-center px-3" style={wellStyle(weapon.grade)}>
                       {weapon.tier ? <span className={`absolute left-2 top-2 rounded-mark px-1.5 py-0.5 text-[11px] font-semibold ${tierClass(weapon.tier)}`} title={tierTitle(weapon)}>聪聪 {weapon.tier}</span> : null}
                       {pic ? (
                         <img
