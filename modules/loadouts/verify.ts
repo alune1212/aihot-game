@@ -1,6 +1,7 @@
 // 每天对一遍改枪码：格式、枪名是否还对得上名录、在不在最近一次完整的官方列表里。
 // 对不上的社区码标成 pending，页面写「待验证」。来源完整抓取后不再列出的，标成 removed；
-// 过季的由清理任务删掉。这一轮抓取失败时，不根据「列表里没有」去改状态。
+// 过季的由清理任务删掉。拿不到可用的官方列表时不改已有状态（还没查过的记成 pending），
+// 避免抓取失败、数据过期或没开 LOADOUT_AMS_ENABLED 时把「待验证」清成 ok。
 import type { Db } from "@aihot/backend/db";
 import { sql } from "@aihot/backend/db";
 import { GAME_ID, matchWeapon } from "./catalog.ts";
@@ -18,6 +19,8 @@ export interface VerifyInput {
   officialListKnown: boolean;
   onOfficialList: boolean;
   feedSources: readonly { absent: boolean }[];
+  /** 上一轮记下的状态。没有可用的官方列表时原样保留；还没有状态就是 null。 */
+  previous: Verification | null;
 }
 
 export function codeMatchesWeapon(code: string, weapon: string): boolean {
@@ -29,6 +32,7 @@ export function codeMatchesWeapon(code: string, weapon: string): boolean {
 
 /** 官方列表对得上就是 ok。社区码对不上官方列表，或格式、枪名对不上，标 pending。来源都撤了标 removed。 */
 export function judgeVerification(input: VerifyInput): Verification {
+  if (!input.officialListKnown) return input.previous ?? "pending";
   const shaped = codeMatchesWeapon(input.code, input.weapon);
   const hadFeed = input.feedSources.length > 0;
   const allAbsent = hadFeed && input.feedSources.every((source) => source.absent);
@@ -59,8 +63,8 @@ export async function verifyLoadouts(db: Db = sql): Promise<VerifyReport> {
       AND NOT EXISTS (SELECT 1 FROM loadout_code_sources s WHERE s.loadout_id = c.id AND s.source <> 'yunmaku')
       AND NOT EXISTS (SELECT 1 FROM loadout_details d WHERE d.loadout_id = c.id)
     RETURNING c.id`;
-  const rows = await db<{ id: number; code: string; weapon: string; has_detail: boolean }[]>`
-    SELECT c.id, c.code, c.weapon, (d.loadout_id IS NOT NULL) AS has_detail
+  const rows = await db<{ id: number; code: string; weapon: string; has_detail: boolean; verification: Verification | null }[]>`
+    SELECT c.id, c.code, c.weapon, c.verification, (d.loadout_id IS NOT NULL) AS has_detail
     FROM loadout_codes c
     LEFT JOIN loadout_details d ON d.loadout_id = c.id
     WHERE c.game_id = ${GAME_ID}`;
@@ -99,6 +103,7 @@ export async function verifyLoadouts(db: Db = sql): Promise<VerifyReport> {
       officialListKnown,
       onOfficialList,
       feedSources: sources.map((source) => ({ absent: source.absent_at != null })),
+      previous: row.verification,
     });
     const decoded = decodeLoadoutCode(row.code);
     const decodeStatus = row.has_detail ? "official" : decoded.ok ? "decoded" : "opaque";
