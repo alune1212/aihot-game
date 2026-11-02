@@ -31,11 +31,19 @@ test("a late run writes the issue that was due, not today's", () => {
   assert.equal(dueMonthly(editionAt("monthly", "2027-01-15")), "2026-12");
 });
 
-test("a daily with nothing judged in its window is refused, not published as a quiet day", async () => {
+test("a daily with an empty window is skipped, and one with unjudged articles still fails", async () => {
   const date = "2098-01-15";
-  await assert.rejects(composeDaily(date), /nothing judged/);
+  assert.equal(await composeDaily(date), null);
   const [row] = await sql`SELECT 1 FROM reports WHERE kind = 'daily' AND key = ${date}`;
   assert.equal(row, undefined);
+  const pending = "2098-01-16";
+  const id = `report-empty-${T}`;
+  await sql`INSERT INTO sources (id, name, kind, tier, participation_mode, next_fetch_at) VALUES (${id}, 'Reports', 'rss', 'T1', 'editorial', '2100-01-01')`;
+  await sql`INSERT INTO articles (id, source_id, identity_key, url, title, body_text, discovered_at, timeline_at, published_at)
+    VALUES (${id}, ${id}, ${id}, ${`https://example.com/${id}`}, '待判断', 'b', '2098-01-16T00:00:00+08:00', '2098-01-16T00:00:00+08:00', '2098-01-16T00:00:00+08:00')`;
+  await assert.rejects(composeDaily(pending), /nothing judged/);
+  const [pendingRow] = await sql`SELECT 1 FROM reports WHERE kind = 'daily' AND key = ${pending}`;
+  assert.equal(pendingRow, undefined);
 });
 
 test("a weekly that froze no summaries shows the articles' public summaries", async () => {

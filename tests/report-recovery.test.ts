@@ -95,10 +95,12 @@ test("empty older gaps cannot starve a later daily, weekly or monthly, and failu
   await sql`INSERT INTO reports (kind, key, window_start, window_end, content, generated_at)
     VALUES ('daily', '2024-01-23', now(), now(), ${sql.json({ sections: [{ label: "行业动态", items: [{ itemId: early, title: early }] }] })}, now())`;
   await item("2024-02-02");
-  await assert.rejects(composeDueReports(editionAt("daily", "2024-02-02", 3600)), /reports:/);
+  const { failed } = await composeDueReports(editionAt("daily", "2024-02-02", 3600));
+  assert.deepEqual(failed, [], "an empty day is skipped, not a failed issue");
   for (const [kind, key] of [["daily", "2024-02-02"], ["weekly", "2024-W04"], ["monthly", "2024-01"]]) {
     assert.ok(await report(kind!, key!), `${kind} ${key} was recovered past the empty gaps`);
   }
+  assert.equal(await report("daily", "2024-01-24"), undefined, "the empty day is not published");
 });
 
 test("a week or month that ended before the first daily is not due, so a site started mid-month runs clean", async () => {

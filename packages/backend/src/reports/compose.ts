@@ -86,14 +86,20 @@ function windowPoint(at: Date): string {
  * the editors judged with nothing new in it still has its issue: no entries, and a lead that says so
  * (REPORTS.quiet).
  */
-export async function composeDaily(date: string, reason?: string): Promise<{ key: string; entries: number }> {
+export async function composeDaily(date: string, reason?: string): Promise<{ key: string; entries: number } | null> {
   const previous = await savedReport("daily", date);
   if (previous && reason === undefined) return { key: date, entries: previous.entries };
   const end = beijingAt(date, EDITION_TIMES.daily);
   const start = new Date(end.getTime() - 86400000);
   const edition = await dailyEdition(date, start, end);
-  // Nothing judged in the window is a failure upstream, not a quiet day: the run fails and is caught up later.
-  if (edition.entries.length === 0 && edition.stats.judgedReports === 0) throw new Error(`daily ${date}: nothing judged in its window`);
+  // No articles in the window is a quiet skip: few sources have empty days, and that is not a failed run.
+  // Articles that are still unjudged stay an error so catch-up retries them. Returning null does not
+  // write the issue, so a later article in the same window is still composed.
+  if (edition.entries.length === 0 && edition.stats.judgedReports === 0) {
+    if (edition.stats.windowArticles > 0) throw new Error(`daily ${date}: nothing judged in its window`);
+    console.log(JSON.stringify({ level: "info", msg: "daily skipped", date, reason: "empty window" }));
+    return null;
+  }
   const issue = arrangeDaily(edition.entries);
   const [lead, ...rest] = issue.main;
   const content = {

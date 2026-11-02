@@ -272,6 +272,16 @@ async function missedFacts(start: Date, end: Date): Promise<Array<{ key: string;
     .map(([key, members]) => ({ key, rows: members }));
 }
 
+/** Articles whose own time falls in the window. None means the day really had nothing to judge. */
+async function windowArticles(start: Date, end: Date): Promise<number> {
+  const [row] = await sql<{ n: number }[]>`
+    SELECT count(*)::int AS n FROM articles a
+    WHERE COALESCE(a.published_at, a.discovered_at) >= ${start}
+      AND COALESCE(a.published_at, a.discovered_at) < ${end}
+      AND NOT EXISTS (SELECT 1 FROM publications p WHERE p.article_id = a.id AND p.backfill)`;
+  return row!.n;
+}
+
 /** The window's public reports the editors scored: none means judging did not run there, not a quiet day. */
 async function judgedReports(start: Date, end: Date): Promise<number> {
   const [row] = await sql<{ n: number }[]>`
@@ -297,7 +307,7 @@ interface Fact { key: string; rows: ReportRow[]; selected: boolean; sources: str
  * selected reports and missed facts, minus what the week's issues already carried, one entry per event.
  */
 export async function dailyEdition(date: string, start: Date, end: Date): Promise<{ entries: EditionEntry[]; stats: Record<string, number> }> {
-  const [memory, selected, missed, judged] = await Promise.all([dailyMemory(date), periodReports(start, end), missedFacts(start, end), judgedReports(start, end)]);
+  const [memory, selected, missed, judged, articles] = await Promise.all([dailyMemory(date), periodReports(start, end), missedFacts(start, end), judgedReports(start, end), windowArticles(start, end)]);
   const raw = [
     ...[...groupBy(selected, factKeyOf)].map(([key, rows]) => ({ key, rows, selected: true })),
     ...missed.map((m) => ({ ...m, selected: false })),
@@ -365,7 +375,7 @@ export async function dailyEdition(date: string, start: Date, end: Date): Promis
   entries.sort((a, b) => b.importance - a.importance || a.entry.itemId.localeCompare(b.entry.itemId));
   return {
     entries,
-    stats: { judgedReports: judged, selectedReports: selected.length, facts: raw.length, repeatsSuppressed: raw.length - kept.length, fillIns: kept.filter((f) => !f.selected).length, events: entries.length },
+    stats: { judgedReports: judged, windowArticles: articles, selectedReports: selected.length, facts: raw.length, repeatsSuppressed: raw.length - kept.length, fillIns: kept.filter((f) => !f.selected).length, events: entries.length },
   };
 }
 
