@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 import { data, useLoaderData } from "react-router";
 import { beijingStamp } from "@aihot/contracts/time";
 import { loadOr404 } from "@aihot/web/lib/api.server";
@@ -142,15 +142,9 @@ function gradeColor(grade: number | null): string {
   }
 }
 
-function gradeWell(grade: number | null): string {
-  switch (grade) {
-    case 2: return "radial-gradient(ellipse at center,#1c4030 0%,#121820 72%)";
-    case 3: return "radial-gradient(ellipse at center,#1a3050 0%,#121820 72%)";
-    case 4: return "radial-gradient(ellipse at center,#321c4a 0%,#121820 72%)";
-    case 5: return "radial-gradient(ellipse at center,#403418 0%,#121820 72%)";
-    case 6: return "radial-gradient(ellipse at center,#4a2020 0%,#121820 72%)";
-    default: return "radial-gradient(ellipse at center,#2a3548 0%,#121820 72%)";
-  }
+function wellStyle(grade: number | null): CSSProperties {
+  const tinted = grade != null && grade >= 2;
+  return { "--grade": gradeColor(grade), ...(tinted ? {} : { "--gun-grade-mix": "0%" }) } as CSSProperties;
 }
 
 function money(value: number | null): string {
@@ -225,10 +219,10 @@ export default function LoadoutDetailPage() {
         </nav>
       ) : null}
       <section className="mt-4 grid items-stretch gap-4 lg:grid-cols-2">
-        <div className="relative flex min-h-[220px] items-center justify-center overflow-hidden rounded-panel border border-line bg-[radial-gradient(ellipse_at_center,#243044_0%,#10141c_70%)] px-4">
+        <div className="gun-well relative flex min-h-[220px] items-center justify-center overflow-hidden rounded-panel border border-line px-4" style={wellStyle(grade)}>
           {picture
-            ? <img src={picture} alt="" width={640} height={240} fetchPriority="high" decoding="async" className="max-h-[240px] max-w-full object-contain drop-shadow-[0_10px_18px_rgba(0,0,0,0.45)]" />
-            : <span className="text-[14px] text-[#c5ceda]">暂无官方图</span>}
+            ? <img src={picture} alt="" width={640} height={240} fetchPriority="high" decoding="async" className="gun-sprite max-h-[240px] max-w-full object-contain" />
+            : <span className="text-[14px] text-ink-4">暂无官方图</span>}
           <span className="absolute inset-x-0 bottom-0 h-1" style={{ background: gradeColor(grade) }} />
         </div>
         <div className="flex min-w-0 flex-col gap-2.5 py-1">
@@ -295,10 +289,10 @@ export default function LoadoutDetailPage() {
               {installed.map((slot) => (
                 <li key={slot.slotId} className="flex flex-col gap-1.5 rounded-card border-2 bg-surface p-3" style={{ borderColor: gradeColor(slot.grade) }}>
                   <p className="text-[12px] font-semibold text-[#24527f] dark:text-[#9ec0ff]">{slot.slotName}</p>
-                  <div className="grid h-[88px] place-items-center rounded-control border-2 p-2" style={{ background: gradeWell(slot.grade), borderColor: gradeColor(slot.grade) }}>
+                  <div className="gun-well grid h-[88px] place-items-center rounded-control border-2 p-2" style={{ ...wellStyle(slot.grade), borderColor: gradeColor(slot.grade) }}>
                     {slot.pic
-                      ? <img src={slot.pic} alt={slot.name ?? slot.slotName} width={120} height={72} loading="lazy" fetchPriority="low" decoding="async" className="max-h-[72px] max-w-full object-contain [filter:brightness(1.15)_drop-shadow(0_2px_6px_rgba(0,0,0,0.45))]" />
-                      : <span className="text-[12px] text-[#c5ceda]">无图</span>}
+                      ? <img src={slot.pic} alt={slot.name ?? slot.slotName} width={120} height={72} loading="lazy" fetchPriority="low" decoding="async" className="gun-sprite max-h-[72px] max-w-full object-contain" />
+                      : <span className="text-[12px] text-ink-4">无图</span>}
                   </div>
                   <p className="min-h-[2.4em] text-[13px] font-bold leading-snug text-ink">{slot.name ?? "未命名配件"}</p>
                   <p className="text-[12px] text-ink-3">单价 <span className="num font-bold text-amber">{money(slot.price)}</span></p>
@@ -325,8 +319,8 @@ export default function LoadoutDetailPage() {
               return (
                 <li key={item.id}>
                   <a href={`/loadouts/${item.id}`} className="block rounded-card border border-line bg-surface p-3 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
-                    <span className="flex h-[88px] items-center justify-center rounded-control bg-[radial-gradient(ellipse_at_center,#243044_0%,#10141c_72%)]">
-                      {pic ? <img src={pic} alt="" width={160} height={72} loading="lazy" decoding="async" className="max-h-[72px] max-w-full object-contain" /> : <span className="text-[12px] text-[#c5ceda]">暂无官方图</span>}
+                    <span className="gun-well flex h-[88px] items-center justify-center rounded-control">
+                      {pic ? <img src={pic} alt="" width={160} height={72} loading="lazy" decoding="async" className="gun-sprite max-h-[72px] max-w-full object-contain" /> : <span className="text-[12px] text-ink-4">暂无官方图</span>}
                     </span>
                     <span className="mt-2 block truncate text-[14px] font-semibold text-ink">{item.name || "改枪方案"}</span>
                     <span className="mt-1 flex items-center justify-between gap-2 text-[12px]">

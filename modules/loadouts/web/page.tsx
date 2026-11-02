@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { useLoaderData, useSearchParams } from "react-router";
 import { apiGet } from "@aihot/web/lib/api.server";
 import { copyText } from "@aihot/web/lib/clipboard";
@@ -99,6 +99,11 @@ function gradeColor(grade: number | null): string {
     case 6: return "#ff5d5d";
     default: return "#c5ceda";
   }
+}
+
+function wellStyle(grade: number | null): CSSProperties {
+  const tinted = grade != null && grade >= 2;
+  return { "--grade": gradeColor(grade), ...(tinted ? {} : { "--gun-grade-mix": "0%" }) } as CSSProperties;
 }
 
 function lowestTotal(codes: LoadoutCode[]): number | null {
@@ -209,19 +214,19 @@ export default function LoadoutsPage() {
                     className={`overflow-hidden rounded-card border bg-surface text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${on ? "border-accent shadow-[0_0_0_1px_var(--accent)]" : "border-line"}`}
                     onClick={() => patch({ gun: weapon.name })}
                   >
-                    <span className="flex h-[110px] items-center justify-center bg-[radial-gradient(ellipse_at_center,#243044_0%,#10141c_72%)] px-3">
+                    <span className="gun-well flex h-[110px] items-center justify-center px-3" style={wellStyle(weapon.grade)}>
                       {pic ? (
                         <img
                           src={pic}
                           alt=""
                           width={280}
                           height={90}
-                          className="max-h-[90px] max-w-full object-contain drop-shadow-[0_4px_8px_rgba(0,0,0,0.45)]"
+                          className="gun-sprite max-h-[90px] max-w-full object-contain"
                           fetchPriority={index === 0 ? "high" : undefined}
                           loading={index < 4 ? undefined : "lazy"}
                         />
                       ) : (
-                        <span className="text-[13px] text-[#c5ceda]">暂无官方图</span>
+                        <span className="text-[13px] text-ink-4">暂无官方图</span>
                       )}
                     </span>
                     <span className="block h-[3px]" style={{ background: gradeColor(weapon.grade) }} />
@@ -290,8 +295,8 @@ function DrawerBody({ weapon, codes, onClose, titleId, closeRef }: {
   return (
     <>
       <div className="flex items-center gap-3 border-b border-line px-4 py-3">
-        <span className="grid h-12 w-[72px] shrink-0 place-items-center rounded-control bg-[radial-gradient(ellipse_at_center,#243044_0%,#10141c_72%)]">
-          {pic ? <img src={pic} alt="" width={72} height={48} className="max-h-12 max-w-[72px] object-contain" /> : null}
+        <span className="gun-well grid h-12 w-[72px] shrink-0 place-items-center rounded-control" style={wellStyle(weapon.grade)}>
+          {pic ? <img src={pic} alt="" width={72} height={48} className="gun-sprite max-h-12 max-w-[72px] object-contain" /> : null}
         </span>
         <div className="min-w-0 flex-1">
           <h2 id={titleId} className="truncate text-[16px] font-semibold text-ink" aria-live="polite">{weapon.name}</h2>
@@ -336,8 +341,8 @@ function SchemeCard({ code }: { code: LoadoutCode }) {
           {shown.map((part, index) => {
             const pic = playerhubPic(part.pic);
             return (
-              <li key={`${part.name ?? "part"}-${index}`} className="grid size-10 place-items-center rounded-control border-2 bg-[#10141c] p-0.5" style={{ borderColor: gradeColor(part.grade) }} title={part.name ?? undefined}>
-                {pic ? <img src={pic} alt={part.name ?? "配件"} width={36} height={36} className="max-h-full max-w-full object-contain" loading="lazy" fetchPriority="low" /> : <span className="sr-only">{part.name ?? "配件"}</span>}
+              <li key={`${part.name ?? "part"}-${index}`} className="gun-well grid size-10 place-items-center rounded-control border-2 p-0.5" style={{ ...wellStyle(part.grade), borderColor: gradeColor(part.grade) }} title={part.name ?? undefined}>
+                {pic ? <img src={pic} alt={part.name ?? "配件"} width={36} height={36} className="gun-sprite max-h-full max-w-full object-contain" loading="lazy" fetchPriority="low" /> : <span className="sr-only">{part.name ?? "配件"}</span>}
               </li>
             );
           })}
