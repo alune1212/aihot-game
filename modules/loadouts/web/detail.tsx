@@ -6,6 +6,7 @@ import { copyText } from "@aihot/web/lib/clipboard";
 import { pageMeta } from "@aihot/web/lib/seo";
 import { PhoneBar } from "@aihot/web/components/shell/PhoneBar";
 import type { Screen } from "@aihot/web/components/shell/screens";
+import { gunHref } from "../query.ts";
 
 export const handle: Screen = { tab: "loadouts", name: "改枪" };
 
@@ -204,7 +205,7 @@ export default function LoadoutDetailPage() {
   const picture = playerhubPic(detail?.previewPic) || playerhubPic(detail?.gun.pic) || playerhubPic(gun.pic);
   const grade = detail ? detail.gun.grade : gun.grade;
   const listCategory = `/loadouts?category=${encodeURIComponent(code.categoryKey)}`;
-  const listGun = `${listCategory}&gun=${encodeURIComponent(code.weapon)}`;
+  const listGun = gunHref(code.weapon);
   const installed = detail?.slots.filter((slot) => slot.objectId) ?? [];
   const updatedAt = detail ? beijingStamp(detail.prices.pricedAt ?? detail.syncedAt) : null;
   return (
