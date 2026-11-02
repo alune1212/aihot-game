@@ -20,6 +20,7 @@ import {
 } from "./ams.ts";
 import { GAME_ID, matchWeapon, WEAPON_CATEGORIES } from "./catalog.ts";
 import { isOfficialSource, isPreferredAuthor, presentSources, SEASON_START } from "./feeds.ts";
+import { currentSeason } from "./season.ts";
 import { formatApplyCount, formatLikeCount } from "./codes.ts";
 import { presentBalance, type WeaponBalanceView } from "./balance.ts";
 import { formatGamePrice } from "./parse-yufan.ts";
@@ -280,11 +281,13 @@ export interface PublicLoadoutCode {
   likesText: string | null;
   featured: boolean;
   stale: boolean;
+  verification: "ok" | "pending" | "removed" | null;
+  decodeStatus: "official" | "decoded" | "opaque" | null;
 }
 
-function presentCode(row: StoredCode, sources: Array<{ source: string; sourceUrl: string | null }> = []): PublicLoadoutCode {
+function presentCode(row: StoredCode, sources: Array<{ source: string; sourceUrl: string | null }> = [], seasonStart = SEASON_START): PublicLoadoutCode {
   const postedOn = row.noted_at ? beijingDate(row.noted_at) : null;
-  const stale = !!postedOn && postedOn < SEASON_START;
+  const stale = !!postedOn && postedOn < seasonStart;
   const shown = presentSources(row.source, row.source_url, sources);
   return {
     id: Number(row.id),
@@ -302,6 +305,8 @@ function presentCode(row: StoredCode, sources: Array<{ source: string; sourceUrl
     likesText: formatLikeCount(row.likes),
     featured: isPreferredAuthor(row.author) && !stale,
     stale,
+    verification: row.verification ?? null,
+    decodeStatus: row.decode_status ?? null,
   };
 }
 
@@ -338,11 +343,13 @@ function categoryLabelOf(key: string): string {
   return WEAPON_CATEGORIES.find((category) => category.key === key)?.label ?? key;
 }
 
-function rankCode(row: StoredCode): number {
+function rankCode(row: StoredCode, seasonStart: string): number {
   const postedOn = row.noted_at ? beijingDate(row.noted_at) : null;
-  if (postedOn && postedOn < SEASON_START) return 3;
+  if (postedOn && postedOn < seasonStart) return 4;
   if (isOfficialSource(row.source)) return 0;
-  return isPreferredAuthor(row.author) ? 1 : 2;
+  if (isPreferredAuthor(row.author)) return 1;
+  if (row.source === "yunmaku" && !row.author) return 3;
+  return 2;
 }
 
 export async function loadoutDetail(db: Db, id: number): Promise<{
@@ -354,12 +361,14 @@ export async function loadoutDetail(db: Db, id: number): Promise<{
   balance: WeaponBalanceView;
   detail: LoadoutDetailView | null;
 } | null> {
+  const season = await currentSeason(db);
+  const seasonStart = season.confidence === "certain" ? season.startsOn : SEASON_START;
   const [code] = await db<StoredCode[]>`
-    SELECT id, category_key, weapon, code, mode, price_text, author, popularity, likes, source, source_url, noted_at
+    SELECT id, category_key, weapon, code, mode, price_text, author, popularity, likes, source, source_url, noted_at, verification, decode_status
     FROM loadout_codes WHERE id = ${id}`;
   if (!code) return null;
   const family = await db<StoredCode[]>`
-    SELECT id, category_key, weapon, code, mode, price_text, author, popularity, likes, source, source_url, noted_at
+    SELECT id, category_key, weapon, code, mode, price_text, author, popularity, likes, source, source_url, noted_at, verification, decode_status
     FROM loadout_codes WHERE game_id = ${GAME_ID} AND weapon = ${code.weapon}`;
   const sourceRows = family.length
     ? await db<{ loadout_id: number; source: string; source_url: string | null }[]>`
@@ -371,9 +380,9 @@ export async function loadoutDetail(db: Db, id: number): Promise<{
     list.push({ source: row.source, sourceUrl: row.source_url });
     sourcesById.set(Number(row.loadout_id), list);
   }
-  const shown = presentCode(code, sourcesById.get(Number(code.id)) ?? []);
+  const shown = presentCode(code, sourcesById.get(Number(code.id)) ?? [], seasonStart);
   const ranked = [...family].sort((a, b) => {
-    const byRank = rankCode(a) - rankCode(b);
+    const byRank = rankCode(a, seasonStart) - rankCode(b, seasonStart);
     if (byRank) return byRank;
     const byPop = (b.popularity ?? -1) - (a.popularity ?? -1);
     if (byPop) return byPop;
@@ -391,7 +400,7 @@ export async function loadoutDetail(db: Db, id: number): Promise<{
     if (payload) payloads.set(Number(row.loadout_id), payload);
   }
   const siblings: LoadoutSiblingView[] = kept.map((row) => {
-    const view = presentCode(row, sourcesById.get(Number(row.id)) ?? []);
+    const view = presentCode(row, sourcesById.get(Number(row.id)) ?? [], seasonStart);
     return {
       id: view.id,
       name: payloads.get(view.id)?.name ?? null,
@@ -433,7 +442,7 @@ export async function loadoutDetail(db: Db, id: number): Promise<{
     objectId: asId(mapped?.object_id) ?? payload?.gun.objectId ?? null,
   };
   const related: LoadoutRelatedView[] = relatedRows.map((row) => {
-    const view = presentCode(row, sourcesById.get(Number(row.id)) ?? []);
+    const view = presentCode(row, sourcesById.get(Number(row.id)) ?? [], seasonStart);
     const item = payloads.get(view.id)!;
     const total = summarizePrices(item.gun.objectId, item.slots, prices).total;
     return {
@@ -479,6 +488,8 @@ interface StoredCode {
   source: string | null;
   source_url: string | null;
   noted_at: Date | null;
+  verification?: "ok" | "pending" | "removed" | null;
+  decode_status?: "official" | "decoded" | "opaque" | null;
 }
 
 export type { StoredCode };

@@ -5,10 +5,19 @@ import { GAME_ID, GAME_NAME } from "./catalog.ts";
 import { loadoutDetail, priceLoadoutList, syncLoadoutDetails, syncLoadoutPrices } from "./detail.ts";
 import { fetchAmsCodes, fetchDeltaCodes, fetchNssCodes, fetchWeaponTiers, fetchWeaponTtk } from "./ingest.ts";
 import { fetchLoadoutFeeds } from "./fetch.ts";
-import { BALANCE_SEASON_NOTE, SEASON_START, feedEnabled } from "./feeds.ts";
+import { cleanupOutOfSeason } from "./cleanup.ts";
+import { BALANCE_SEASON_NOTE, feedEnabled } from "./feeds.ts";
+import { currentSeason, detectSeason, seasonLabel, type StoredSeason } from "./season.ts";
 import { listLoadouts, syncArticleLoadouts } from "./store.ts";
+import { verifyLoadouts } from "./verify.ts";
 
-const note = `来自官方热门、鸟兽兽、国服配装、云码库、洲械库，以及写明了枪名的文章。早于 ${SEASON_START} 的不新收录，换季后更早的码会标成过季。点进一条可以看配件、最新价格和属性。枪卡上的梯队和理论 TTK 是社区补充。${BALANCE_SEASON_NOTE} 价格以游戏内交易行为准。导入前请回游戏里核对。`;
+function seasonNote(season: StoredSeason): string {
+  const label = seasonLabel(season);
+  const seasonLine = season.confidence === "certain"
+    ? `当前赛季 ${label}，${season.startsOn} 起。更早的码会删掉，不留在这页。`
+    : `赛季还没从官方公告确认，暂按 ${label}（${season.startsOn}）。没确认之前不会换季，也不会删码。`;
+  return `来自官方热门、鸟兽兽、国服配装、云码库、洲械库，以及写明了枪名的文章。${seasonLine}点进一条可以看配件、最新价格和属性。对不上官方列表的社区码会标「待验证」。枪卡上的梯队和理论 TTK 是社区补充。${BALANCE_SEASON_NOTE} 价格以游戏内交易行为准。导入前请回游戏里核对。`;
+}
 
 export default defineServerModule({
   name: "loadouts",
@@ -16,12 +25,14 @@ export default defineServerModule({
     app.get("/api/loadouts", async (req, reply) => {
       const game = typeof (req.query as { game?: unknown }).game === "string" ? (req.query as { game: string }).game : GAME_ID;
       reply.header("cache-control", "public, max-age=60");
+      const season = await currentSeason(sql);
       const listed = await listLoadouts(sql, game === GAME_ID ? GAME_ID : game);
       return {
         game: { id: GAME_ID, name: GAME_NAME },
+        season: { name: season.name, number: season.number, startsOn: season.startsOn, label: seasonLabel(season), confidence: season.confidence },
         ...listed,
         categories: await priceLoadoutList(sql, listed.categories),
-        note,
+        note: seasonNote(season),
       };
     });
     app.get("/api/loadouts/:id", async (req, reply) => {
@@ -95,6 +106,27 @@ export default defineServerModule({
       missed: "skip",
       when: () => feedEnabled("LOADOUT_TIER_ENABLED"),
       run: () => fetchWeaponTiers(),
+    },
+    {
+      name: "loadouts.season",
+      cron: "30 4 * * *",
+      missed: "once",
+      when: () => process.env.COLLECT_ENABLED === "true",
+      run: () => detectSeason(),
+    },
+    {
+      name: "loadouts.verify",
+      cron: "20 5 * * *",
+      missed: "skip",
+      when: () => process.env.COLLECT_ENABLED === "true",
+      run: () => verifyLoadouts(),
+    },
+    {
+      name: "loadouts.cleanup",
+      cron: "10 6 * * *",
+      missed: "skip",
+      when: () => process.env.COLLECT_ENABLED === "true",
+      run: () => cleanupOutOfSeason(),
     },
   ],
   alerts: async () => {

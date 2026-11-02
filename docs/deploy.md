@@ -58,6 +58,8 @@ MCP 默认接受 `SITE_URL` 的主机以及 `localhost`、`127.0.0.1`、`[::1]`�
 
 ### 更新
 
+**2026 年 11 月改枪码会删过季的码。** 官方公告确认了新赛季、而且新赛季已经有够多的码之后，清理任务会删掉上一季的改枪码，以及它的来源行和官方详情。没有作者、没有别的来源、也没有官方详情的云码库码也会删。赛季没确认、这一轮有来源抓取失败、或新赛季的码太少时，一条都不删。`LOADOUT_CLEANUP_DRY_RUN=true` 只写日志。详见 `modules/loadouts/README.md`。新增表 `loadout_seasons`，`loadout_codes` 增加可空列 `verification`、`decode_status`，`loadout_code_sources` 增加可空列 `absent_at`。
+
 **2026 年 11 月改枪码增加五个来源。** 已有改枪码都保留，不改文章。新跑三个迁移，都是加表或加可空列：
 
 - `0106_loadout_code_sources.sql`：一条码可以记下多个来源
@@ -301,6 +303,18 @@ MCP 的 `subscriptions/listen` 现在立即返回 HTTP 404 和 JSON-RPC `-32601 
 每个文件只上传一次，放在一个前缀下：每月 1 日放 `monthly/`，周日放 `weekly/`，其他日子放 `daily/`。可以在对象存储里按前缀设不同的过期时间。
 
 恢复时同时取回这一对文件（只有 `.dump` 的就只恢复数据库）：使用与数据库版本兼容的 `pg_restore` 将 `.dump` 恢复到空数据库，再把文件包解压到数据目录根目录（Docker 中为 `/data`，非 Docker 使用 `AIHOT_DATA_DIR`，默认 `.data`），保留包内的子目录结构，并确保运行进程可读取这些文件。只恢复数据库不能找回仍由 `local:` 引用的反馈截图；旧备份中没有包含的文件也无法凭数据库引用恢复。
+
+单机 Mac 上如果不想配对象存储，可以用本地目录备份。默认关着。在 `.env` 里写 `DB_BACKUP_LOCAL=true` 后，worker 每天 04:10（上海时间）往 `DB_BACKUP_LOCAL_DIR` 放一份 custom 格式的 `pg_dump`。compose 把容器里的 `/var/backups/aihot` 挂到宿主机仓库下的 `backups/`。大约保留 14 天（`DB_BACKUP_LOCAL_KEEP_DAYS`）。这不上传，也不代替上面的对象存储备份；两个都开着就会各做一份。
+
+恢复前先停掉会写库的进程，再把某一天的文件灌回。文件名里的日期是北京时间：
+
+```bash
+docker compose stop api worker web
+docker compose exec -T db pg_restore --clean --if-exists --no-owner -U aihot -d aihot < backups/aihot-2026-11-02.dump
+docker compose start api worker web
+```
+
+`--clean` 会按备份里的对象先删再装。只在确认这份备份就是要回去的那一版时用。灌完后看 `/api/health`。
 
 下面的手动导出只包含数据库，不包含上述附件目录：
 

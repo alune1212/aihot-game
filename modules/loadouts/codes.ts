@@ -77,7 +77,7 @@ export function formatLikeCount(value: number | null | undefined): string | null
 }
 
 /** 一条原始记录收不收、收成哪把枪。 */
-export function decideLoadout(raw: RawLoadout): Decision {
+export function decideLoadout(raw: RawLoadout, seasonStart = SEASON_START): Decision {
   const code = cleanCode(raw.code);
   if (!code) return { ok: false, reason: "shape" };
   // 国际服码即使套了国服模式名也不能收，国服改枪台导不进去。
@@ -99,7 +99,7 @@ export function decideLoadout(raw: RawLoadout): Decision {
     popularity: popularityOf(raw.popularity),
     likes: popularityOf(raw.likes),
   };
-  if (postedOn && postedOn < SEASON_START) return { ok: false, reason: "stale", row };
+  if (postedOn && postedOn < seasonStart) return { ok: false, reason: "stale", row };
   return { ok: true, row };
 }
 

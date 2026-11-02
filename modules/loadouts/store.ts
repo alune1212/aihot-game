@@ -4,6 +4,7 @@ import { GAME_ID, isWeaponListed, WEAPON_CATEGORIES, type WeaponCategory } from 
 import { extractLoadouts } from "./extract.ts";
 import { formatApplyCount, formatLikeCount, type FeedRow } from "./codes.ts";
 import { isOfficialSource, isPreferredAuthor, presentSources, publicFeed, SEASON_START, sourceOutranks, type ShownSource } from "./feeds.ts";
+import { currentSeason } from "./season.ts";
 import { EMPTY_BALANCE, presentBalance, type WeaponBalanceView } from "./balance.ts";
 
 export interface LoadoutPart {
@@ -32,6 +33,9 @@ export interface LoadoutCode {
   likesText: string | null;
   featured: boolean;
   stale: boolean;
+  /** ok 对过官方列表或格式；pending 页面上是「待验证」；removed 是来源已撤下。 */
+  verification: "ok" | "pending" | "removed" | null;
+  popularity: number | null;
   /** 枪身加配件的最新总价。还没齐的时候是 null，不用方案上的旧标价。 */
   totalText: string | null;
   /** 和 totalText 同一笔官方总价，方便列表算最低价。没有就是 null。 */
@@ -195,14 +199,53 @@ export async function recordFeedFailure(db: Db, id: string, name: string, error:
       health = CASE WHEN loadout_feeds.fail_count + 1 >= 5 THEN 'failing' ELSE 'degraded' END`;
 }
 
-function isStale(notedAt: Date | null): boolean {
-  return !!notedAt && beijingDate(notedAt) < SEASON_START;
+function isStale(notedAt: Date | null, seasonStart: string): boolean {
+  return !!notedAt && beijingDate(notedAt) < seasonStart;
+}
+
+function rankGroup(row: { noted_at: Date | null; source: string | null; author: string | null }, seasonStart: string): number {
+  if (isStale(row.noted_at, seasonStart)) return 4;
+  if (isOfficialSource(row.source)) return 0;
+  if (isPreferredAuthor(row.author)) return 1;
+  if (row.source === "yunmaku" && !row.author) return 3;
+  return 2;
+}
+
+/** 云码库没有作者、也没有别的来源、也没有官方详情的码不留。 */
+export async function dropBareYunmaku(db: Db): Promise<number> {
+  const dropped = await db<{ id: number }[]>`
+    DELETE FROM loadout_codes c
+    WHERE c.game_id = ${GAME_ID} AND c.source = 'yunmaku' AND c.author IS NULL
+      AND NOT EXISTS (SELECT 1 FROM loadout_code_sources s WHERE s.loadout_id = c.id AND s.source <> 'yunmaku')
+      AND NOT EXISTS (SELECT 1 FROM loadout_details d WHERE d.loadout_id = c.id)
+    RETURNING c.id`;
+  if (dropped.length) console.log(JSON.stringify({ level: "info", msg: "loadout drop bare yunmaku", count: dropped.length }));
+  return dropped.length;
+}
+
+/** 这一来源完整抓完以后，列表里不再出现的码记上 absent_at。空列表不当成「全部撤下」。 */
+export async function reconcileFeedSources(db: Db, source: string, codes: readonly string[]): Promise<number> {
+  if (!codes.length) return 0;
+  const marked = await db<{ loadout_id: number }[]>`
+    UPDATE loadout_code_sources s SET absent_at = now()
+    FROM loadout_codes c
+    WHERE s.loadout_id = c.id AND c.game_id = ${GAME_ID} AND s.source = ${source}
+      AND s.absent_at IS NULL AND NOT (c.code = ANY(${[...codes]}::text[]))
+    RETURNING s.loadout_id`;
+  await db`
+    UPDATE loadout_code_sources s SET absent_at = NULL
+    FROM loadout_codes c
+    WHERE s.loadout_id = c.id AND c.game_id = ${GAME_ID} AND s.source = ${source}
+      AND c.code = ANY(${[...codes]}::text[])`;
+  return marked.length;
 }
 
 export async function listLoadouts(db: Db, gameId = GAME_ID): Promise<{ gameId: string; categories: LoadoutCategoryView[] }> {
   const catalog: readonly WeaponCategory[] = gameId === GAME_ID ? WEAPON_CATEGORIES : [];
-  const rows = await db<{ id: number; category_key: string; weapon: string; code: string; mode: string | null; price_text: string | null; author: string | null; popularity: number | null; likes: number | null; source: string | null; source_url: string | null; noted_at: Date | null }[]>`
-    SELECT id, category_key, weapon, code, mode, price_text, author, popularity, likes, source, source_url, noted_at
+  const season = await currentSeason(db);
+  const seasonStart = season.confidence === "certain" ? season.startsOn : SEASON_START;
+  const rows = await db<{ id: number; category_key: string; weapon: string; code: string; mode: string | null; price_text: string | null; author: string | null; popularity: number | null; likes: number | null; source: string | null; source_url: string | null; noted_at: Date | null; verification: "ok" | "pending" | "removed" | null }[]>`
+    SELECT id, category_key, weapon, code, mode, price_text, author, popularity, likes, source, source_url, noted_at, verification
     FROM loadout_codes
     WHERE game_id = ${gameId}`;
   const sourceRows = rows.length
@@ -219,9 +262,8 @@ export async function listLoadouts(db: Db, gameId = GAME_ID): Promise<{ gameId: 
     SELECT weapon, tier, tier_as_of, ttk, patch FROM loadout_weapon_balance`;
   const balanceByWeapon = new Map(balanceRows.map((row) => [row.weapon, presentBalance(row)]));
   const ranked = [...rows].sort((a, b) => {
-    // 过季最后。官方热门靠前，然后是主播，再是其他方案。
-    const group = (row: typeof a) => (isStale(row.noted_at) ? 3 : isOfficialSource(row.source) ? 0 : isPreferredAuthor(row.author) ? 1 : 2);
-    const byGroup = group(a) - group(b);
+    // 过季最后。官方热门、主播、其他方案，然后才是没有作者的云码库。
+    const byGroup = rankGroup(a, seasonStart) - rankGroup(b, seasonStart);
     if (byGroup) return byGroup;
     const byPop = (b.popularity ?? -1) - (a.popularity ?? -1);
     if (byPop) return byPop;
@@ -249,8 +291,10 @@ export async function listLoadouts(db: Db, gameId = GAME_ID): Promise<{ gameId: 
       postedOn,
       popularityText: formatApplyCount(row.popularity),
       likesText: formatLikeCount(row.likes),
-      featured: isPreferredAuthor(row.author) && !isStale(row.noted_at),
-      stale: isStale(row.noted_at),
+      featured: isPreferredAuthor(row.author) && !isStale(row.noted_at, seasonStart),
+      stale: isStale(row.noted_at, seasonStart),
+      verification: row.verification,
+      popularity: row.popularity,
       totalText: null,
       total: null,
       name: null,

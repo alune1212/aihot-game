@@ -16,6 +16,7 @@ import {
   DFTTK_ORIGIN,
   NSS_FEED_ID,
   NSS_ORIGIN,
+  SEASON_START,
   TIER_FEED_ID,
   TIER_PAGE,
   nssGunUrl,
@@ -25,7 +26,9 @@ import { deltaCodeHasLoadouts, parseDeltaCode } from "./parse-deltacode.ts";
 import { nssLastPage, parseNss } from "./parse-nss.ts";
 import { parseTierList } from "./parse-tier.ts";
 import { mayFetch } from "./robots.ts";
-import { noteStaleLoadouts, recordFeedFailure, recordFeedSuccess, saveFeedLoadout, saveWeaponTier, saveWeaponTtk } from "./store.ts";
+import { seasonFloor } from "./season.ts";
+import { noteStaleLoadouts, reconcileFeedSources, recordFeedFailure, recordFeedSuccess, saveFeedLoadout, saveWeaponTier, saveWeaponTtk } from "./store.ts";
+import { beijingDate } from "@aihot/contracts/time";
 
 const REQUEST_GAP_MS = 1200;
 const AMS_PAGE_SIZE = 20;
@@ -88,14 +91,14 @@ function allow(status: number, body: string, url: string): boolean {
   return mayFetch(status, body, url, SITE.crawlerName);
 }
 
-function classify(raws: readonly RawLoadout[]): Gathered {
+function classify(raws: readonly RawLoadout[], seasonStart = SEASON_START): Gathered {
   const rows: FeedRow[] = [];
   const stale: FeedRow[] = [];
   const rejected = { shape: 0, international: 0, unmapped: 0 };
   const unmapped: string[] = [];
   const byMode: Record<string, number> = {};
   for (const raw of mergeRaw(raws)) {
-    const decision = decideLoadout(raw);
+    const decision = decideLoadout(raw, seasonStart);
     if (decision.ok) {
       rows.push(decision.row);
       byMode[decision.row.mode] = (byMode[decision.row.mode] ?? 0) + 1;
@@ -131,6 +134,10 @@ async function storeGathered(sourceId: string, sourceName: string, gathered: Gat
     counts[result] += 1;
   }
   counts.staleNoted = await noteStaleLoadouts(sql, sourceId, gathered.stale);
+  if (!gathered.warning) {
+    const listed = [...gathered.rows, ...gathered.stale].map((row) => row.code);
+    await reconcileFeedSources(sql, sourceId, listed);
+  }
   const note = summarize(sourceName, gathered, counts);
   await recordFeedSuccess(sql, sourceId, sourceName, note);
   return { ok: true, ...counts, stale: gathered.stale.length, ...gathered.rejected, byMode: gathered.byMode, unmapped: gathered.unmapped, warning: gathered.warning };
@@ -139,14 +146,15 @@ async function storeGathered(sourceId: string, sourceName: string, gathered: Gat
 async function runFeed(
   id: string,
   name: string,
-  gather: (fetchPage: PageFetch, sleep: (ms: number) => Promise<void>) => Promise<Gathered>,
+  gather: (fetchPage: PageFetch, sleep: (ms: number) => Promise<void>, seasonStart: string) => Promise<Gathered>,
   deps: { fetch?: PageFetch; sleep?: (ms: number) => Promise<void>; now?: () => Date },
 ): Promise<Record<string, unknown>> {
   const fetchPage = deps.fetch ?? defaultFetch;
   const sleep = deps.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
   const now = deps.now ?? (() => new Date());
+  const startsOn = await seasonFloor(sql, beijingDate(now()));
   try {
-    return await storeGathered(id, name, await gather(fetchPage, sleep), now());
+    return await storeGathered(id, name, await gather(fetchPage, sleep, startsOn), now());
   } catch (error) {
     const message = (error instanceof Error ? error.message : String(error)).slice(0, 500);
     await recordFeedFailure(sql, id, name, message);
@@ -167,7 +175,7 @@ async function defaultFetch(url: string, init?: PageInit): Promise<PageResponse>
 }
 
 /** 官方改枪台方案列表。匿名可读。新码只入库，配件和属性留给 loadouts.detail。 */
-export async function gatherAms(fetchPage: PageFetch, sleep: (ms: number) => Promise<void>, env: { DF_QQ_COOKIE?: string } = process.env): Promise<Gathered> {
+export async function gatherAms(fetchPage: PageFetch, sleep: (ms: number) => Promise<void>, env: { DF_QQ_COOKIE?: string } = process.env, seasonStart = SEASON_START): Promise<Gathered> {
   const cookie = qqCookie(env);
   const ide = fetchPage as IdeFetch;
   const raws: RawLoadout[] = [];
@@ -207,15 +215,15 @@ export async function gatherAms(fetchPage: PageFetch, sleep: (ms: number) => Pro
   }
   if (!warning && (page - 1) * AMS_PAGE_SIZE < total && page > AMS_PAGE_CAP) warning = `官方方案超过 ${AMS_PAGE_CAP} 页，这一轮没翻完`;
   if (!raws.length) throw new Error(warning ?? "官方方案列表里没有改枪码");
-  return { ...classify(raws), warning };
+  return { ...classify(raws, seasonStart), warning };
 }
 
 export function fetchAmsCodes(deps: { fetch?: PageFetch; sleep?: (ms: number) => Promise<void>; now?: () => Date; env?: { DF_QQ_COOKIE?: string } } = {}): Promise<Record<string, unknown>> {
-  return runFeed(AMS_FEED_ID, "官方方案列表", (fetchPage, sleep) => gatherAms(fetchPage, sleep, deps.env), deps);
+  return runFeed(AMS_FEED_ID, "官方方案列表", (fetchPage, sleep, seasonStart) => gatherAms(fetchPage, sleep, deps.env, seasonStart), deps);
 }
 
 /** 鸟兽兽 /gun。只抓公开 HTML，间隔不短于 robots 的 Crawl-delay。 */
-export async function gatherNss(fetchPage: PageFetch, sleep: (ms: number) => Promise<void>): Promise<Gathered> {
+export async function gatherNss(fetchPage: PageFetch, sleep: (ms: number) => Promise<void>, seasonStart = SEASON_START): Promise<Gathered> {
   const robots = await robotsOf(fetchPage, sleep, `${NSS_ORIGIN}/robots.txt`);
   const firstUrl = nssGunUrl(1);
   if (!allow(robots.status, robots.body, firstUrl)) throw new Error("robots.txt 不允许抓取鸟兽兽改枪码");
@@ -242,7 +250,7 @@ export async function gatherNss(fetchPage: PageFetch, sleep: (ms: number) => Pro
   if (last >= NSS_PAGE_CAP) warning = warning ?? `鸟兽兽超过 ${NSS_PAGE_CAP} 页，这一轮没翻完`;
   const raws = pages.flatMap((page) => parseNss(page.html, page.url));
   if (!raws.length && pages.some((page) => /data-card/.test(page.html))) throw new Error("鸟兽兽页面结构变了，没有抽出改枪码");
-  return { ...classify(raws), warning };
+  return { ...classify(raws, seasonStart), warning };
 }
 
 export function fetchNssCodes(deps: { fetch?: PageFetch; sleep?: (ms: number) => Promise<void>; now?: () => Date } = {}): Promise<Record<string, unknown>> {
@@ -250,14 +258,14 @@ export function fetchNssCodes(deps: { fetch?: PageFetch; sleep?: (ms: number) =>
 }
 
 /** delta-code 公开的 /loadouts。robots 禁止 /api/，这里也不访问接口。403 记失败，不连累别的源。 */
-export async function gatherDeltaCode(fetchPage: PageFetch, sleep: (ms: number) => Promise<void>): Promise<Gathered> {
+export async function gatherDeltaCode(fetchPage: PageFetch, sleep: (ms: number) => Promise<void>, seasonStart = SEASON_START): Promise<Gathered> {
   const robots = await robotsOf(fetchPage, sleep, `${DELTACODE_ORIGIN}/robots.txt`);
   if (!allow(robots.status, robots.body, DELTACODE_PAGE)) throw new Error("robots.txt 不允许抓取国服配装");
   const html = await readPage(fetchPage, sleep, DELTACODE_PAGE);
   const raws = parseDeltaCode(html);
   if (!raws.length && deltaCodeHasLoadouts(html)) throw new Error("国服配装页面结构变了，没有抽出改枪码");
   if (!raws.length) throw new Error("国服配装页面里没有改枪码");
-  return classify(raws);
+  return classify(raws, seasonStart);
 }
 
 export function fetchDeltaCodes(deps: { fetch?: PageFetch; sleep?: (ms: number) => Promise<void>; now?: () => Date } = {}): Promise<Record<string, unknown>> {
