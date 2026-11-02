@@ -76,10 +76,12 @@ services:
       SITE_URL: ${SITE_URL:-http://localhost:3000}
       TRUST_PROXY: ${TRUST_PROXY:-false}
       AIHOT_RELEASE: ${AIHOT_RELEASE:-}
+      # Inside the container the process must listen on every interface, or the published
+      # port never connects. The host mapping below is what keeps the site off the LAN.
       WEB_HOST: 0.0.0.0
       WEB_PORT: "3000"
     ports:
-      - "${PORT:-3000}:3000"
+      - "${PORT:-127.0.0.1:3000}:3000"
     depends_on:
       api:
         condition: service_started

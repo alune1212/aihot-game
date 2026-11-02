@@ -221,6 +221,8 @@ export const REPORTS = {
 export const ALERTS = {
   /** 多少分钟没有收录新文章就告警“网站停止收录新内容”（最多一天）；环境变量 ALERT_QUIET_MINUTES 优先。 */
   quietMinutes: 360,
+  /** 编辑信源一直抓取成功、只是没有新文章时，多少分钟才告警（最多一天）。 */
+  quietWhileFetchingMinutes: 720,
   /** 同一条告警里，“没有”后面补一句平时的收录量；null 就不写。 */
   usualFlow: null as string | null,
   /** worker 停了的告警里，怎么看它的日志。 */
@@ -298,7 +300,7 @@ export const DEPLOYMENT = {
 
 /** RSS 订阅源的说明里随站点而变的说法。 */
 export const FEED_COPY = {
-  /** “全部动态”源的说明里，除了未审内容、低相关条目和已合并重复条目，还写明不含的内容（选填）。 */
+  /** “全部动态”源的说明里，除了未审内容、低相关条目、低分条目和已合并重复条目，还写明不含的内容（选填）。 */
   allLeavesOut: [] as string[],
 };
 

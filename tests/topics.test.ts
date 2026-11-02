@@ -124,6 +124,15 @@ test("a company topic takes the articles about it, not the ones that only mentio
   assert.deepEqual(await topicsOf(agent), ["operations", "versions"]);
 });
 
+test("a company topic's name and aliases find reports about it", async () => {
+  const id = await report({at: hoursAgo(2), title: `新赛季上线 ${T}`, subjects: ['delta-force'], selected: false});
+  for (const query of ['三角洲行动', 'Delta Force', 'GTI']) {
+    const res = await app.inject({method: 'GET', url: `/api/site/pool?q=${encodeURIComponent(query)}`});
+    assert.equal(res.statusCode, 200);
+    assert.ok(ids(JSON.parse(res.body).items).includes(id), 'the topic name and its aliases must find subject-tagged reports');
+  }
+});
+
 test("a story page names the topics of its reports", async () => {
   const launch = await story(`烽火地带新地图 ${T}`);
   await report({ source: OFFICIAL, at: hoursAgo(26), title: `烽火地带新地图 ${T}`, tags: ["烽火地带"], fact: await fact(launch.id, "开放新地图") });

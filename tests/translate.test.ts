@@ -7,7 +7,7 @@ import http from "node:http";
 import { after, before, test } from "node:test";
 import { closeDb, sql } from "@aihot/backend/db";
 import { upsertMaterial } from "@aihot/backend/content/materials";
-import { translateArticle, translatePending } from "@aihot/backend/editorial/translate";
+import { translateArticle, translatePending, importBodyTranslation } from "@aihot/backend/editorial/translate";
 import { stopBoss } from "@aihot/backend/jobs/queue";
 import { autoReleaseUnknownReceipts } from "@aihot/backend/operations/recover";
 import { publishArticle } from "@aihot/backend/publication/publish";
@@ -439,4 +439,48 @@ test("account 429 pauses translation without spending the article attempts", asy
     if(original===undefined) delete process.env.TRANSLATE_MODEL; else process.env.TRANSLATE_MODEL=original;
     await denied.close();
   }
+});
+
+test("saved X long articles neither buy unused introduction translations nor occupy the translation batch", async () => {
+  const source = `${SOURCE}-long-article`;
+  await sql`INSERT INTO sources(id,name,kind,tier,participation_mode,site_fulltext,syndicate_fulltext,next_fetch_at)
+    VALUES(${source},'Saved long article','x_search','T1','editorial',true,true,'2100-01-01')`;
+  const intro = `This introduction is long enough to be translated, but its translation would omit the already saved complete article. ${T}`;
+  const { articleId: long } = await upsertMaterial({sourceId: source, url: `https://x.com/fixture/status/${T}`, title: intro,
+    language: 'en', bodyText: intro, bodyStatus: 'ok', via: 'fetch', publishedAt: new Date(), discoveredAt: new Date(Date.now()+30_000_000),
+    xPost: {tweetId: T, authorName: 'Fixture', handle: 'fixture', text: intro}});
+  await sql`UPDATE articles SET x_article=${sql.json({title:'Saved long article',text:'The complete article is already stored.'})} WHERE id=${long}`;
+  const { articleId: regular } = await upsertMaterial({sourceId: SOURCE, url: `${URL_}-behind-long-article`, title: `Regular article ${T}`,
+    language: 'en', bodyText: `The price is ten dollars ${T}.`, bodyHtml: `<p>The price is ten dollars ${T}.</p>`,
+    bodyStatus: 'ok', via: 'fetch', publishedAt: new Date(), discoveredAt: new Date(Date.now()+29_000_000)});
+  for (const id of [long, regular]) {
+    await sql`INSERT INTO analyses(article_id,input_revision,origin,relevance,category,title_zh,summary_zh,reason_zh,score,selected)
+      VALUES(${id},1,'rule','pass','ai-models','保存正文','摘要','理由',90,true)`;
+    await publishArticle(id,{releasedAt:new Date(Date.now()-60_000)});
+  }
+  const calls = provider.hits();
+  assert.equal((await translateArticle(long)).status,'skipped');
+  assert.equal(provider.hits(),calls,'a direct request must not pay for a translation readers cannot see');
+  const run = await translatePending({limit:1});
+  assert.equal(run.done.find(r=>r.articleId===regular)?.status,'translated','skip the long article before applying the batch limit');
+  assert.ok(!run.done.some(r=>r.articleId===long));
+  assert.equal((await sql`SELECT 1 FROM receipts WHERE subject LIKE ${`article:${long}@%`}`).length,0);
+  assert.equal((await sql`SELECT 1 FROM translations WHERE article_id=${long}`).length,0);
+});
+
+test("external model translation import restores against the exact body and rejects a stale source", async () => {
+  const sourceHtml = '<p>The imported price is ten dollars.</p>';
+  const { articleId } = await upsertMaterial({sourceId:SOURCE,url:`${URL_}-external`,title:'Imported body',
+    language:'en',bodyHtml:sourceHtml,bodyText:'The imported price is ten dollars.',bodyStatus:'ok',via:'import'});
+  const input = {articleId,sourceHtml,title:'导入正文',html:'<p>导入价格为十美元。</p><script>bad()</script>',complete:true};
+  await importBodyTranslation(input);
+  const [saved] = await sql`SELECT revision,body_html,origin,created_at FROM translations WHERE article_id=${articleId}`;
+  assert.equal(saved.origin,'model');
+  assert.equal(saved.body_html,'<p>导入价格为十美元。</p>');
+  await importBodyTranslation(input);
+  assert.equal((await sql`SELECT created_at FROM translations WHERE article_id=${articleId}`)[0].created_at.getTime(),saved.created_at.getTime());
+  await upsertMaterial({sourceId:SOURCE,url:`${URL_}-external`,title:'Imported body',language:'en',
+    bodyHtml:'<p>The price is twenty dollars.</p>',bodyText:'The price is twenty dollars.',bodyStatus:'ok',via:'import'});
+  await assert.rejects(importBodyTranslation(input),/source changed/);
+  assert.equal((await sql`SELECT revision FROM translations WHERE article_id=${articleId}`)[0].revision,saved.revision);
 });
