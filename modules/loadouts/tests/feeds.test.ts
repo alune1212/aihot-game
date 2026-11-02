@@ -220,6 +220,7 @@ test("the same code stays with the first feed, streamers sort first, and an arti
     "K437突击步枪-烽火地带-6OLDCODE12345678901",
   ]);
   assert.equal(codes[0]?.source, "洲械库");
+  assert.deepEqual(codes[0]?.sources.map((item) => item.label), ["洲械库", "云码库"]);
   assert.equal(codes[0]?.author, "昊天（三角洲行动）");
   assert.equal(codes[0]?.priceText, "约 25 万");
   assert.equal(codes[0]?.featured, true);
@@ -417,7 +418,7 @@ test("official hot codes sort ahead of streamers, and a repeated code stays with
     sourceUrl: "https://www.yunmaku.com/loadouts",
     postedOn: "2026-10-01",
   }, at), "inserted");
-  assert.equal(await saveFeedLoadout(sql, "yufan", { ...official, code: owned, author: "官方作者", popularity: 99999 }, at), "kept");
+  assert.equal(await saveFeedLoadout(sql, "yufan", { ...official, code: owned, author: "官方作者", popularity: 99999 }, at), "updated");
   await saveFeedLoadout(sql, "yufan", {
     ...official,
     code: "M250通用机枪-烽火地带-6STALEHOTCODE123456",
@@ -429,10 +430,10 @@ test("official hot codes sort ahead of streamers, and a repeated code stays with
   const codes = listed.categories.find((category) => category.key === "lmg")!.weapons.find((weapon) => weapon.name === "M250通用机枪")!.codes;
   assert.deepEqual(codes.map((item) => item.code), [
     official.code,
+    owned,
     "M250通用机枪-烽火地带-6HOTTEROLDER12345678",
     "M250通用机枪-烽火地带-6STREAMERCODE123456",
     "M250通用机枪-烽火地带-6PLAINNEWER12345678",
-    owned,
     "M250通用机枪-烽火地带-6STALEHOTCODE123456",
   ]);
   assert.equal(codes[0]?.source, "官方热门");
@@ -441,11 +442,15 @@ test("official hot codes sort ahead of streamers, and a repeated code stays with
   assert.equal(codes[0]?.priceText, "61万");
   assert.equal(codes[0]?.popularityText, "应用 86.4万");
   assert.equal(codes[0]?.featured, false);
-  assert.equal(codes[1]?.popularityText, "应用 50");
-  assert.equal(codes[2]?.featured, true);
-  assert.equal(codes[2]?.source, "洲械库");
+  assert.deepEqual(codes[0]?.sources.map((item) => item.label), ["官方热门", "云码库"]);
+  assert.equal(codes[1]?.source, "官方热门");
+  assert.equal(codes[1]?.author, "官方作者");
+  assert.equal(codes[1]?.popularityText, "应用 10万");
+  assert.deepEqual(codes[1]?.sources.map((item) => item.label), ["官方热门", "云码库"]);
+  assert.equal(codes[2]?.popularityText, "应用 50");
+  assert.equal(codes[3]?.featured, true);
+  assert.equal(codes[3]?.source, "洲械库");
   assert.equal(codes[4]?.source, "云码库");
-  assert.equal(codes[4]?.author, "路人");
   assert.equal(codes[5]?.stale, true);
   assert.equal(codes[5]?.popularityText, "应用 2万");
 });

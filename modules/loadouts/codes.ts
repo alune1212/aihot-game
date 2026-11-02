@@ -12,6 +12,8 @@ export interface RawLoadout {
   sourceUrl: string;
   /** 应用次数。没有就不参与热度排序。 */
   popularity?: number | null;
+  /** 点赞数。没有就不显示。 */
+  likes?: number | null;
 }
 
 export interface FeedRow {
@@ -24,6 +26,7 @@ export interface FeedRow {
   sourceUrl: string;
   postedOn: string | null;
   popularity: number | null;
+  likes?: number | null;
 }
 
 export type Decision =
@@ -55,13 +58,22 @@ export function popularityOf(value: number | null | undefined): number | null {
   return value;
 }
 
-/** 页面上的应用次数。没有、或是 0，就不显示。 */
-export function formatApplyCount(value: number | null | undefined): string | null {
+function formatCount(prefix: string, value: number | null | undefined): string | null {
   const count = popularityOf(value);
   if (count == null || count <= 0) return null;
-  if (count < 10000) return `应用 ${count}`;
+  if (count < 10000) return `${prefix} ${count}`;
   const wan = Math.round(count / 1000) / 10;
-  return `应用 ${wan}万`;
+  return `${prefix} ${wan}万`;
+}
+
+/** 页面上的应用次数。没有、或是 0，就不显示。 */
+export function formatApplyCount(value: number | null | undefined): string | null {
+  return formatCount("应用", value);
+}
+
+/** 页面上的点赞数。没有、或是 0，就不显示。 */
+export function formatLikeCount(value: number | null | undefined): string | null {
+  return formatCount("赞", value);
 }
 
 /** 一条原始记录收不收、收成哪把枪。 */
@@ -85,6 +97,7 @@ export function decideLoadout(raw: RawLoadout): Decision {
     sourceUrl: raw.sourceUrl,
     postedOn,
     popularity: popularityOf(raw.popularity),
+    likes: popularityOf(raw.likes),
   };
   if (postedOn && postedOn < SEASON_START) return { ok: false, reason: "stale", row };
   return { ok: true, row };
@@ -109,6 +122,7 @@ export function mergeRaw(raws: readonly RawLoadout[]): RawLoadout[] {
       postedOn: prev.postedOn ?? raw.postedOn,
       sourceUrl: prev.sourceUrl || raw.sourceUrl,
       popularity: prev.popularity ?? raw.popularity ?? null,
+      likes: prev.likes ?? raw.likes ?? null,
     });
   }
   return [...map.values()];

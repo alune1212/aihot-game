@@ -18,6 +18,11 @@ interface LoadoutPart {
   grade: number | null;
 }
 
+interface ShownSource {
+  label: string;
+  url: string | null;
+}
+
 interface LoadoutCode {
   id: number;
   code: string;
@@ -25,7 +30,9 @@ interface LoadoutCode {
   author: string | null;
   source: string | null;
   sourceUrl: string | null;
+  sources: ShownSource[];
   popularityText: string | null;
+  likesText: string | null;
   featured: boolean;
   stale: boolean;
   totalText: string | null;
@@ -40,6 +47,11 @@ interface Weapon {
   pic: string | null;
   grade: number | null;
   objectId: number | null;
+  tier: string | null;
+  tierAsOf: string | null;
+  ttkText: string | null;
+  ttkNote: string | null;
+  patchText: string | null;
   codes: LoadoutCode[];
 }
 
@@ -121,6 +133,17 @@ function priceLabel(value: number | null): string {
   const wan = coins / 10000;
   const shown = wan >= 100 ? String(Math.round(wan)) : String(Math.round(wan * 10) / 10);
   return `${shown}万`;
+}
+
+function tierClass(tier: string): string {
+  if (tier.startsWith("S")) return "bg-amber-soft text-amber-ink";
+  if (tier.startsWith("A")) return "bg-ok-soft text-ok-ink";
+  if (tier.startsWith("B")) return "bg-accent-soft text-accent-ink";
+  return "border border-line text-ink-2";
+}
+
+function tierTitle(weapon: { tierAsOf: string | null }): string {
+  return `聪聪强度梯队${weapon.tierAsOf ? `，${weapon.tierAsOf} 更新` : ""}。社区排名，不是官方`;
 }
 
 function schemeTitle(code: LoadoutCode): string {
@@ -214,7 +237,8 @@ export default function LoadoutsPage() {
                     className={`overflow-hidden rounded-card border bg-surface text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${on ? "border-accent shadow-[0_0_0_1px_var(--accent)]" : "border-line"}`}
                     onClick={() => patch({ gun: weapon.name })}
                   >
-                    <span className="gun-well flex h-[110px] items-center justify-center px-3" style={wellStyle(weapon.grade)}>
+                    <span className="gun-well relative flex h-[110px] items-center justify-center px-3" style={wellStyle(weapon.grade)}>
+                      {weapon.tier ? <span className={`absolute left-2 top-2 rounded-mark px-1.5 py-0.5 text-[11px] font-semibold ${tierClass(weapon.tier)}`} title={tierTitle(weapon)}>聪聪 {weapon.tier}</span> : null}
                       {pic ? (
                         <img
                           src={pic}
@@ -240,6 +264,7 @@ export default function LoadoutsPage() {
                       <span className="mt-1 block text-[13px] text-ink-2">
                         最低 <span className="num font-semibold text-amber">{priceLabel(lowestTotal(codes))}</span>
                       </span>
+                      {weapon.ttkText ? <span className="mt-1 block truncate text-[12px] text-ink-3" title={weapon.ttkNote ?? undefined}>{weapon.ttkText}</span> : null}
                     </span>
                   </button>
                 );
@@ -300,7 +325,12 @@ function DrawerBody({ weapon, codes, onClose, titleId, closeRef }: {
         </span>
         <div className="min-w-0 flex-1">
           <h2 id={titleId} className="truncate text-[16px] font-semibold text-ink" aria-live="polite">{weapon.name}</h2>
-          <p className="mt-0.5 text-[13px] text-ink-3">{weapon.categoryLabel} · {codes.length} 个方案</p>
+          <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[13px] text-ink-3">
+            <span>{weapon.categoryLabel} · {codes.length} 个方案</span>
+            {weapon.tier ? <span className={`rounded-mark px-1.5 py-0.5 text-[11px] font-semibold ${tierClass(weapon.tier)}`} title={tierTitle(weapon)}>聪聪 {weapon.tier}</span> : null}
+          </p>
+          {weapon.ttkText ? <p className="mt-0.5 text-[12px] text-ink-3" title={weapon.ttkNote ?? undefined}>{weapon.ttkText}</p> : null}
+          {weapon.patchText ? <p className="mt-0.5 line-clamp-2 text-[12px] text-ink-4" title={weapon.patchText}>{weapon.patchText}</p> : null}
         </div>
         <button ref={closeRef} type="button" className="shrink-0 rounded-control border border-line px-2.5 py-1 text-[13px] text-ink-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent" onClick={onClose}>
           关闭
@@ -315,6 +345,15 @@ function DrawerBody({ weapon, codes, onClose, titleId, closeRef }: {
   );
 }
 
+function SourceMarks({ code }: { code: Pick<LoadoutCode, "source" | "sourceUrl" | "sources"> }) {
+  const marks = code.sources?.length ? code.sources : (code.source ? [{ label: code.source, url: code.sourceUrl }] : []);
+  return marks.map((item) => (
+    item.url
+      ? <a key={item.label} href={item.url} className="rounded-mark border border-line px-1.5 py-0.5 text-ink-2 hover:text-accent">{item.label}</a>
+      : <span key={item.label} className={`rounded-mark px-1.5 py-0.5 font-semibold ${item.label === "官方热门" ? "bg-ok-soft text-ok-ink" : "border border-line text-ink-2"}`}>{item.label}</span>
+  ));
+}
+
 function SchemeCard({ code }: { code: LoadoutCode }) {
   const shown = code.parts.slice(0, PARTS_SHOWN);
   const rest = code.parts.length - shown.length;
@@ -327,14 +366,11 @@ function SchemeCard({ code }: { code: LoadoutCode }) {
       <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[12px]">
         {code.mode ? <span className="rounded-mark border border-[#31465f] bg-[#172232] px-1.5 py-0.5 text-[#d6e6ff]">{code.mode}</span> : null}
         <span className="text-ink-3"><span className="num">{code.partCount}</span> 个配件</span>
-        {code.popularityText ? <span className="text-ink-3">{code.popularityText}</span> : null}
+        {code.popularityText ? <span className="rounded-mark border border-line px-1.5 py-0.5 text-ink-2">{code.popularityText}</span> : null}
+        {code.likesText ? <span className="rounded-mark border border-line px-1.5 py-0.5 text-ink-2">{code.likesText}</span> : null}
         {code.featured ? <span className="rounded-mark bg-amber-soft px-1.5 py-0.5 font-semibold text-amber-ink">主播</span> : null}
         {code.stale ? <span className="rounded-mark border border-line px-1.5 py-0.5 text-ink-4">过季</span> : null}
-        {code.source ? (
-          code.sourceUrl
-            ? <a href={code.sourceUrl} className="rounded-mark border border-line px-1.5 py-0.5 text-ink-2 hover:text-accent">{code.source}</a>
-            : <span className={`rounded-mark px-1.5 py-0.5 font-semibold ${code.source === "官方热门" ? "bg-ok-soft text-ok-ink" : "border border-line text-ink-2"}`}>{code.source}</span>
-        ) : null}
+        <SourceMarks code={code} />
       </div>
       {code.parts.length ? (
         <ul className="mt-2.5 flex flex-wrap items-center gap-1.5" aria-label="配件">

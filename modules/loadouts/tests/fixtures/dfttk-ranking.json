@@ -1,0 +1,10 @@
+{
+  "dataVersion": "20261102-preview-fixture",
+  "ranking": { "distanceRange": { "defaultMin": 15, "defaultMax": 40 } },
+  "candidateMetrics": [
+    ["18010000013:base:1:stock", [[0, 6.178], [53, 7.24]]],
+    ["18010000013:13020000173:1:tuned", [[0, 4.1]]],
+    ["18040000003:base:1:stock", [[0, 3.5], [20, 8.2]]],
+    ["18019999999:base:1:stock", [[0, 5]]]
+  ]
+}

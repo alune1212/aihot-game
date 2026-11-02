@@ -1,0 +1,9 @@
+{
+  "resourceBaseUrl": "/data/releases/fixture/v3",
+  "previewUrl": "/data/releases/fixture/preview.json",
+  "entrypoints": { "firefightHomeRanking": "rankings/firefight/index.json" },
+  "files": {
+    "locales/zh-CN/items.json": { "kind": "itemLocalization" },
+    "rankings/firefight/index.json": { "kind": "firefightHomeRankingIndex" }
+  }
+}

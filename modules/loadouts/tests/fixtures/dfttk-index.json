@@ -1,0 +1,7 @@
+{
+  "defaultScenarioId": "armor-5-ammo-5-default",
+  "scenarios": [
+    { "id": "armor-4-ammo-4-default", "label": "4套 · 4弹 · 实战概率", "file": "rankings/firefight/armor-4.json" },
+    { "id": "armor-5-ammo-5-default", "label": "5套 · 5弹 · 实战概率", "file": "rankings/firefight/armor-5-ammo-5-default.json" }
+  ]
+}

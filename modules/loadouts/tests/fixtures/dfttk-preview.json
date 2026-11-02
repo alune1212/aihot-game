@@ -1,0 +1,14 @@
+{
+  "version": "20261102-preview.5",
+  "weapons": [
+    {
+      "baseWeaponId": "18010000013",
+      "observedAt": "2026-10-29",
+      "patches": [
+        { "path": "combat.damageProfiles.authoring:weapon:18010000013:sol:damage.baseDamage", "before": 31, "after": 32 },
+        { "path": "combat.bulletProfiles.authoring:weapon:18010000013:sol:bullet.attenuationDistancesCm", "before": [5400, 10000], "after": [4000, 10000] },
+        { "path": "combat.secret.internal", "before": 1, "after": 2 }
+      ]
+    }
+  ]
+}

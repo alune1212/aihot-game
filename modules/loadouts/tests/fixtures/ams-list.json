@@ -1,0 +1,43 @@
+{
+  "ret": 0,
+  "sMsg": "succ",
+  "jData": {
+    "data": {
+      "code": 0,
+      "data": {
+        "page": 1,
+        "limit": 20,
+        "totalCount": 2,
+        "list": [
+          {
+            "solutionCode": "K416突击步枪-烽火地带-6AMSLISTCODE123456",
+            "authorNickname": "eStar丨Aqing",
+            "applyNum": 267984,
+            "likeNum": 1553,
+            "armsDetail": { "objectName": "K416突击步枪" }
+          },
+          {
+            "solutionCode": "Vector冲锋枪-Operations-6INTLSERVERCODE123",
+            "authorNickname": "海外",
+            "applyNum": 3,
+            "likeNum": 1,
+            "armsDetail": { "objectName": "Vector冲锋枪" }
+          },
+          {
+            "solutionCode": "没这把枪-烽火地带-6UNMAPPEDGUN123456",
+            "authorNickname": "路人",
+            "applyNum": 4,
+            "likeNum": 0,
+            "armsDetail": { "objectName": "没这把枪" }
+          },
+          {
+            "solutionCode": "6TAILONLYCODE1234567",
+            "authorNickname": "路人",
+            "applyNum": 1,
+            "likeNum": 1
+          }
+        ]
+      }
+    }
+  }
+}
