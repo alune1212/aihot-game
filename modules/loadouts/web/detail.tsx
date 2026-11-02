@@ -60,9 +60,18 @@ interface Payload {
     author: string | null;
     source: string | null;
     sourceUrl: string | null;
+    sources: Array<{ label: string; url: string | null }>;
     popularityText: string | null;
+    likesText: string | null;
     featured: boolean;
     stale: boolean;
+  };
+  balance: {
+    tier: string | null;
+    tierAsOf: string | null;
+    ttkText: string | null;
+    ttkNote: string | null;
+    patchText: string | null;
   };
   categoryLabel: string;
   gun: { pic: string | null; grade: number | null; objectId: number | null };
@@ -179,8 +188,15 @@ function schemeLabel(name: string | null, mode: string | null): string {
   return name || mode || "方案";
 }
 
+function tierClass(tier: string): string {
+  if (tier.startsWith("S")) return "bg-amber-soft text-amber-ink";
+  if (tier.startsWith("A")) return "bg-ok-soft text-ok-ink";
+  if (tier.startsWith("B")) return "bg-accent-soft text-accent-ink";
+  return "border border-line text-ink-2";
+}
+
 export default function LoadoutDetailPage() {
-  const { code, categoryLabel, gun, siblings, related, detail } = useLoaderData<typeof loader>();
+  const { code, categoryLabel, gun, siblings, related, balance, detail } = useLoaderData<typeof loader>();
   const title = detail?.name || code.weapon;
   const crumb = detail?.name || (code.source ? `${code.source}方案` : "改枪方案");
   const picture = playerhubPic(detail?.previewPic) || playerhubPic(detail?.gun.pic) || playerhubPic(gun.pic);
@@ -229,11 +245,12 @@ export default function LoadoutDetailPage() {
           <h1 data-page-title="" className="text-[26px] font-extrabold leading-tight text-ink">{title}</h1>
           <div className="flex flex-wrap items-center gap-1.5">
             {code.mode ? <span className="rounded-mark border border-[#31465f] bg-[#172232] px-1.5 py-0.5 text-[12px] text-[#d6e6ff]">{code.mode}</span> : null}
-            {code.source ? (
-              code.sourceUrl
-                ? <a href={code.sourceUrl} className="rounded-mark border border-line px-1.5 py-0.5 text-[12px] font-semibold text-ink-2 hover:text-accent">{code.source}</a>
-                : <span className={`rounded-mark px-1.5 py-0.5 text-[12px] font-semibold ${code.source === "官方热门" ? "bg-ok-soft text-ok-ink" : "border border-line text-ink-2"}`}>{code.source}</span>
-            ) : null}
+            {(code.sources?.length ? code.sources : (code.source ? [{ label: code.source, url: code.sourceUrl }] : [])).map((item) => (
+              item.url
+                ? <a key={item.label} href={item.url} className="rounded-mark border border-line px-1.5 py-0.5 text-[12px] font-semibold text-ink-2 hover:text-accent">{item.label}</a>
+                : <span key={item.label} className={`rounded-mark px-1.5 py-0.5 text-[12px] font-semibold ${item.label === "官方热门" ? "bg-ok-soft text-ok-ink" : "border border-line text-ink-2"}`}>{item.label}</span>
+            ))}
+            {balance.tier ? <span className={`rounded-mark px-1.5 py-0.5 text-[12px] font-semibold ${tierClass(balance.tier)}`} title={`聪聪强度梯队${balance.tierAsOf ? `，${balance.tierAsOf} 更新` : ""}。社区排名，不是官方`}>聪聪 {balance.tier}</span> : null}
             {code.featured ? <span className="rounded-mark bg-amber-soft px-1.5 py-0.5 text-[12px] font-semibold text-amber-ink">主播</span> : null}
             {code.stale ? <span className="rounded-mark border border-line px-1.5 py-0.5 text-[12px] text-ink-4">过季</span> : null}
           </div>
@@ -241,6 +258,7 @@ export default function LoadoutDetailPage() {
             <p className="text-[13px] text-ink-3">
               {code.author ? <>作者 <strong className="font-semibold text-ink">{code.author}</strong></> : null}
               {code.popularityText ? <span>{code.author ? " · " : ""}{code.popularityText}</span> : null}
+              {code.likesText ? <span>{code.author || code.popularityText ? " · " : ""}{code.likesText}</span> : null}
             </p>
           ) : (
             <p className="num text-[28px] font-extrabold leading-none text-amber">{code.priceText ?? "—"}</p>
@@ -333,6 +351,18 @@ export default function LoadoutDetailPage() {
               );
             })}
           </ul>
+        </section>
+      ) : null}
+      {balance.ttkText || balance.patchText || balance.tier ? (
+        <section className="mt-6 rounded-panel border border-line bg-surface p-4" aria-labelledby="balance-title">
+          <h2 id="balance-title" className="text-[14px] font-bold text-ink">武器强度 <span className="ml-1 text-[12px] font-medium text-ink-3">社区补充，官方属性仍以上面的改装数据为准</span></h2>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            {balance.tier ? <span className={`rounded-mark px-2 py-1 text-[13px] font-semibold ${tierClass(balance.tier)}`}>聪聪 {balance.tier}{balance.tierAsOf ? ` · ${balance.tierAsOf}` : ""}</span> : null}
+            {balance.ttkText ? <span className="rounded-mark border border-line px-2 py-1 text-[13px] text-ink-2" title={balance.ttkNote ?? undefined}>{balance.ttkText}</span> : null}
+          </div>
+          {balance.ttkNote ? <p className="mt-2 text-[12px] leading-relaxed text-ink-3">{balance.ttkNote}</p> : null}
+          {balance.patchText ? <p className="mt-1 text-[12px] leading-relaxed text-ink-3">{balance.patchText}</p> : null}
+          <p className="mt-2 text-[12px] leading-relaxed text-ink-4">聪聪梯队是社区排名。理论 TTK 来自 DFTTK。下一季「微光」从 2026-11-05 开始，这两项都可能不再对应当前赛季。</p>
         </section>
       ) : null}
     </div>

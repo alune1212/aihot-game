@@ -3,11 +3,12 @@ import { sql } from "@aihot/backend/db";
 import { defineServerModule } from "@aihot/backend/modules";
 import { GAME_ID, GAME_NAME } from "./catalog.ts";
 import { loadoutDetail, priceLoadoutList, syncLoadoutDetails, syncLoadoutPrices } from "./detail.ts";
+import { fetchAmsCodes, fetchDeltaCodes, fetchNssCodes, fetchWeaponTiers, fetchWeaponTtk } from "./ingest.ts";
 import { fetchLoadoutFeeds } from "./fetch.ts";
-import { SEASON_START } from "./feeds.ts";
+import { BALANCE_SEASON_NOTE, SEASON_START, feedEnabled } from "./feeds.ts";
 import { listLoadouts, syncArticleLoadouts } from "./store.ts";
 
-const note = `来自官方热门、云码库、洲械库，以及写明了枪名的文章。早于 ${SEASON_START} 的不新收录，换季后更早的码会标成过季。点进一条可以看配件、最新价格和属性。价格以游戏内交易行为准。导入前请回游戏里核对。`;
+const note = `来自官方热门、鸟兽兽、国服配装、云码库、洲械库，以及写明了枪名的文章。早于 ${SEASON_START} 的不新收录，换季后更早的码会标成过季。点进一条可以看配件、最新价格和属性。枪卡上的梯队和理论 TTK 是社区补充。${BALANCE_SEASON_NOTE} 价格以游戏内交易行为准。导入前请回游戏里核对。`;
 
 export default defineServerModule({
   name: "loadouts",
@@ -56,6 +57,44 @@ export default defineServerModule({
       missed: "skip",
       when: () => process.env.COLLECT_ENABLED === "true",
       run: () => syncLoadoutPrices(),
+    },
+    {
+      name: "loadouts.fetch.ams",
+      // 放在详情任务之前。约四十页，每页隔 1.2 秒。
+      cron: "5 */6 * * *",
+      missed: "skip",
+      when: () => feedEnabled("LOADOUT_AMS_ENABLED"),
+      run: () => fetchAmsCodes(),
+    },
+    {
+      name: "loadouts.fetch.nss",
+      // 页数多，和官方列表错开，每 6 小时一次。Crawl-delay 1 秒，实际隔 1.2 秒。
+      cron: "15 1,7,13,19 * * *",
+      missed: "skip",
+      when: () => feedEnabled("LOADOUT_NSS_ENABLED"),
+      run: () => fetchNssCodes(),
+    },
+    {
+      name: "loadouts.fetch.deltacode",
+      cron: "25 */12 * * *",
+      missed: "skip",
+      when: () => feedEnabled("LOADOUT_DELTACODE_ENABLED"),
+      run: () => fetchDeltaCodes(),
+    },
+    {
+      name: "loadouts.fetch.ttk",
+      // 平衡数据随版本变，一天一次就够。
+      cron: "40 5 * * *",
+      missed: "skip",
+      when: () => feedEnabled("LOADOUT_DFTTK_ENABLED"),
+      run: () => fetchWeaponTtk(),
+    },
+    {
+      name: "loadouts.fetch.tier",
+      cron: "50 5 * * *",
+      missed: "skip",
+      when: () => feedEnabled("LOADOUT_TIER_ENABLED"),
+      run: () => fetchWeaponTiers(),
     },
   ],
   alerts: async () => {

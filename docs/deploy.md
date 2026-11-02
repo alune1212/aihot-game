@@ -58,6 +58,14 @@ MCP 默认接受 `SITE_URL` 的主机以及 `localhost`、`127.0.0.1`、`[::1]`�
 
 ### 更新
 
+**2026 年 11 月改枪码增加五个来源。** 已有改枪码都保留，不改文章。新跑三个迁移，都是加表或加可空列：
+
+- `0106_loadout_code_sources.sql`：一条码可以记下多个来源
+- `0107_loadout_codes_likes.sql`：`loadout_codes` 增加可空列 `likes`
+- `0108_loadout_weapon_balance.sql`：聪聪梯队、理论 TTK 和体验服观察
+
+五个新任务默认关着。要跑的话，在 `COLLECT_ENABLED=true` 之外把对应开关写成 `true`：`LOADOUT_AMS_ENABLED`、`LOADOUT_NSS_ENABLED`、`LOADOUT_DELTACODE_ENABLED`、`LOADOUT_DFTTK_ENABLED`、`LOADOUT_TIER_ENABLED`。不写就和升级前一样，不会去访问这些站。请求仍走 `EGRESS_PROXY_URL`（`.cn` 和官方接口直连）。抓什么、读者看到的名字、什么码会丢掉，见 `modules/loadouts/README.md`。下一季「微光」2026-11-05 开始后，把 `SEASON_START` 改成那一天；聪聪梯队和 DFTTK 的理论 TTK 是社区数据，换季后可能过时，页面上写了更新日期和数据版本。
+
 **2026 年 11 月合并上游引擎。** 已部署的库里，改枪码迁移 `0090_loadout_codes.sql` 到 `0098_loadout_guns.sql` 已经入账。迁移按完整文件名记账，编号相同、文件名不同的各自执行，不会重跑改枪码。这次新跑的是下面四个文件，都不改已有文章和改枪码，也没有必填的新环境变量：
 
 - `0090_source_selection_class.sql`：`sources` 增加可空列 `selection_class`

@@ -250,6 +250,44 @@ function itemObject(row: Record<string, unknown> | null, fallbackName: string | 
   };
 }
 
+export interface SolutionCodeRow {
+  code: string;
+  author: string | null;
+  applyNum: number | null;
+  likeNum: number | null;
+  weaponHint: string | null;
+}
+
+function countOf(value: unknown): number | null {
+  const n = whole(value);
+  if (n === null || n < 0) return null;
+  return n;
+}
+
+/**
+ * 官方方案列表里的码、作者、应用次数和点赞。
+ * 配件和属性仍由详情任务写入，这里不把半份详情当成已经对上。
+ */
+export function parseSolutionCodes(data: unknown): { page: number; total: number; items: SolutionCodeRow[] } | null {
+  const root = record(record(record(data)?.data)?.data);
+  if (!root || !Array.isArray(root.list)) return null;
+  const items: SolutionCodeRow[] = [];
+  for (const entry of root.list) {
+    const item = record(entry);
+    const code = text(item?.solutionCode);
+    if (!item || !code) continue;
+    const arms = record(item.armsDetail);
+    items.push({
+      code,
+      author: text(item.authorNickname),
+      applyNum: countOf(item.applyNum),
+      likeNum: countOf(item.likeNum),
+      weaponHint: text(arms?.objectName),
+    });
+  }
+  return { page: whole(root.page) ?? 1, total: whole(root.totalCount) ?? items.length, items };
+}
+
 /** 一页官方方案。solutionCode 之外的筛选目前会被接口忽略，所以调用方自己对码。 */
 export function parseSolutionPage(data: unknown): SolutionPage | null {
   const root = record(record(record(data)?.data)?.data);

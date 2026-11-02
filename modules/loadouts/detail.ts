@@ -19,8 +19,9 @@ import {
   type LoadoutSlot,
 } from "./ams.ts";
 import { GAME_ID, matchWeapon, WEAPON_CATEGORIES } from "./catalog.ts";
-import { isPreferredAuthor, OFFICIAL_FEED_ID, publicFeed, SEASON_START } from "./feeds.ts";
-import { formatApplyCount } from "./codes.ts";
+import { isOfficialSource, isPreferredAuthor, presentSources, SEASON_START } from "./feeds.ts";
+import { formatApplyCount, formatLikeCount } from "./codes.ts";
+import { presentBalance, type WeaponBalanceView } from "./balance.ts";
 import { formatGamePrice } from "./parse-yufan.ts";
 import { recordFeedFailure, recordFeedSuccess, type LoadoutCategoryView } from "./store.ts";
 
@@ -73,7 +74,7 @@ async function defaultFetch(url: string, init: { method?: string; headers?: Reco
   return { status: res.status, text: () => res.text() };
 }
 
-async function postAms(fetchPage: IdeFetch, sleep: (ms: number) => Promise<void>, method: string, param: unknown, cookie: { header: string; secrets: string[] } | null) {
+export async function postAms(fetchPage: IdeFetch, sleep: (ms: number) => Promise<void>, method: string, param: unknown, cookie: { header: string; secrets: string[] } | null) {
   const headers: Record<string, string> = { "content-type": "application/x-www-form-urlencoded", accept: "application/json" };
   if (cookie) headers.cookie = cookie.header;
   let last = readAms(0, "");
@@ -273,15 +274,18 @@ export interface PublicLoadoutCode {
   author: string | null;
   source: string | null;
   sourceUrl: string | null;
+  sources: Array<{ label: string; url: string | null }>;
   postedOn: string | null;
   popularityText: string | null;
+  likesText: string | null;
   featured: boolean;
   stale: boolean;
 }
 
-function presentCode(row: StoredCode): PublicLoadoutCode {
+function presentCode(row: StoredCode, sources: Array<{ source: string; sourceUrl: string | null }> = []): PublicLoadoutCode {
   const postedOn = row.noted_at ? beijingDate(row.noted_at) : null;
   const stale = !!postedOn && postedOn < SEASON_START;
+  const shown = presentSources(row.source, row.source_url, sources);
   return {
     id: Number(row.id),
     weapon: row.weapon,
@@ -290,9 +294,12 @@ function presentCode(row: StoredCode): PublicLoadoutCode {
     mode: row.mode,
     priceText: row.price_text,
     author: row.author,
-    ...publicFeed(row.source, row.source_url),
+    source: shown[0]?.label ?? null,
+    sourceUrl: shown[0]?.url ?? null,
+    sources: shown,
     postedOn,
     popularityText: formatApplyCount(row.popularity),
+    likesText: formatLikeCount(row.likes),
     featured: isPreferredAuthor(row.author) && !stale,
     stale,
   };
@@ -334,7 +341,7 @@ function categoryLabelOf(key: string): string {
 function rankCode(row: StoredCode): number {
   const postedOn = row.noted_at ? beijingDate(row.noted_at) : null;
   if (postedOn && postedOn < SEASON_START) return 3;
-  if (row.source === OFFICIAL_FEED_ID) return 0;
+  if (isOfficialSource(row.source)) return 0;
   return isPreferredAuthor(row.author) ? 1 : 2;
 }
 
@@ -344,16 +351,27 @@ export async function loadoutDetail(db: Db, id: number): Promise<{
   gun: LoadoutGunView;
   siblings: LoadoutSiblingView[];
   related: LoadoutRelatedView[];
+  balance: WeaponBalanceView;
   detail: LoadoutDetailView | null;
 } | null> {
   const [code] = await db<StoredCode[]>`
-    SELECT id, category_key, weapon, code, mode, price_text, author, popularity, source, source_url, noted_at
+    SELECT id, category_key, weapon, code, mode, price_text, author, popularity, likes, source, source_url, noted_at
     FROM loadout_codes WHERE id = ${id}`;
   if (!code) return null;
-  const shown = presentCode(code);
   const family = await db<StoredCode[]>`
-    SELECT id, category_key, weapon, code, mode, price_text, author, popularity, source, source_url, noted_at
+    SELECT id, category_key, weapon, code, mode, price_text, author, popularity, likes, source, source_url, noted_at
     FROM loadout_codes WHERE game_id = ${GAME_ID} AND weapon = ${code.weapon}`;
+  const sourceRows = family.length
+    ? await db<{ loadout_id: number; source: string; source_url: string | null }[]>`
+        SELECT loadout_id, source, source_url FROM loadout_code_sources WHERE loadout_id IN ${sql(family.map((row) => row.id))}`
+    : [];
+  const sourcesById = new Map<number, { source: string; sourceUrl: string | null }[]>();
+  for (const row of sourceRows) {
+    const list = sourcesById.get(Number(row.loadout_id)) ?? [];
+    list.push({ source: row.source, sourceUrl: row.source_url });
+    sourcesById.set(Number(row.loadout_id), list);
+  }
+  const shown = presentCode(code, sourcesById.get(Number(code.id)) ?? []);
   const ranked = [...family].sort((a, b) => {
     const byRank = rankCode(a) - rankCode(b);
     if (byRank) return byRank;
@@ -373,7 +391,7 @@ export async function loadoutDetail(db: Db, id: number): Promise<{
     if (payload) payloads.set(Number(row.loadout_id), payload);
   }
   const siblings: LoadoutSiblingView[] = kept.map((row) => {
-    const view = presentCode(row);
+    const view = presentCode(row, sourcesById.get(Number(row.id)) ?? []);
     return {
       id: view.id,
       name: payloads.get(view.id)?.name ?? null,
@@ -407,13 +425,15 @@ export async function loadoutDetail(db: Db, id: number): Promise<{
   const prices = new Map(quotes.map((quote) => [Number(quote.object_id), { price: quote.price, at: quote.priced_at.toISOString() }]));
   const [mapped] = await db<{ object_id: string | number | null; pic: string | null; grade: number | null }[]>`
     SELECT object_id, pic, grade FROM loadout_guns WHERE weapon = ${code.weapon}`;
+  const [balanceRow] = await db<{ tier: string | null; tier_as_of: string | null; ttk: unknown; patch: unknown }[]>`
+    SELECT tier, tier_as_of, ttk, patch FROM loadout_weapon_balance WHERE weapon = ${code.weapon}`;
   const gun: LoadoutGunView = {
     pic: playerhubPic(mapped?.pic ?? null) ?? playerhubPic(payload?.gun.pic ?? null),
     grade: mapped ? asGrade(mapped.grade) : asGrade(payload?.gun.grade),
     objectId: asId(mapped?.object_id) ?? payload?.gun.objectId ?? null,
   };
   const related: LoadoutRelatedView[] = relatedRows.map((row) => {
-    const view = presentCode(row);
+    const view = presentCode(row, sourcesById.get(Number(row.id)) ?? []);
     const item = payloads.get(view.id)!;
     const total = summarizePrices(item.gun.objectId, item.slots, prices).total;
     return {
@@ -431,6 +451,7 @@ export async function loadoutDetail(db: Db, id: number): Promise<{
     gun,
     siblings,
     related,
+    balance: presentBalance(balanceRow),
     detail: payload && own ? {
       source: payload.source,
       sourceLabel: "官方改枪台",
@@ -454,6 +475,7 @@ interface StoredCode {
   price_text: string | null;
   author: string | null;
   popularity: number | null;
+  likes: number | null;
   source: string | null;
   source_url: string | null;
   noted_at: Date | null;
