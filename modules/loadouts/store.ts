@@ -6,6 +6,7 @@ import { formatApplyCount, formatLikeCount, type FeedRow } from "./codes.ts";
 import { isOfficialSource, isPreferredAuthor, presentSources, publicFeed, SEASON_START, sourceOutranks, type ShownSource } from "./feeds.ts";
 import { currentSeason } from "./season.ts";
 import { EMPTY_BALANCE, presentBalance, type WeaponBalanceView } from "./balance.ts";
+import { LOADOUT_PER_WEAPON } from "./query.ts";
 
 export interface LoadoutPart {
   name: string | null;
@@ -66,8 +67,6 @@ export interface LoadoutCategoryView {
   note: string;
   weapons: LoadoutWeapon[];
 }
-
-const PER_WEAPON = 40;
 
 /** 文章公开内容变了就重抽一遍；撤下时只删这篇文章自己的码，聚合站收录的不动。 */
 export async function syncArticleLoadouts(db: Db, articleId: string, reduced: boolean): Promise<void> {
@@ -240,7 +239,8 @@ export async function reconcileFeedSources(db: Db, source: string, codes: readon
   return marked.length;
 }
 
-export async function listLoadouts(db: Db, gameId = GAME_ID): Promise<{ gameId: string; categories: LoadoutCategoryView[] }> {
+/** `limitPerWeapon` 为 null 时不截断。页面先筛选再截断，默认调用仍是每把枪 40 条。 */
+export async function listLoadouts(db: Db, gameId = GAME_ID, limitPerWeapon: number | null = LOADOUT_PER_WEAPON): Promise<{ gameId: string; categories: LoadoutCategoryView[] }> {
   const catalog: readonly WeaponCategory[] = gameId === GAME_ID ? WEAPON_CATEGORIES : [];
   const season = await currentSeason(db);
   const seasonStart = season.confidence === "certain" ? season.startsOn : SEASON_START;
@@ -275,7 +275,7 @@ export async function listLoadouts(db: Db, gameId = GAME_ID): Promise<{ gameId: 
   const byWeapon = new Map<string, LoadoutCode[]>();
   for (const row of ranked) {
     const list = byWeapon.get(row.weapon) ?? [];
-    if (list.length >= PER_WEAPON) continue;
+    if (limitPerWeapon !== null && list.length >= limitPerWeapon) continue;
     const postedOn = row.noted_at ? beijingDate(row.noted_at) : null;
     const sources = presentSources(row.source, row.source_url, sourcesById.get(Number(row.id)) ?? []);
     list.push({

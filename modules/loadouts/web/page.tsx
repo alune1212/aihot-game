@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
-import { useLoaderData, useSearchParams } from "react-router";
+import { useLoaderData, useSearchParams, type ShouldRevalidateFunction } from "react-router";
 import { apiGet } from "@aihot/web/lib/api.server";
 import { copyText } from "@aihot/web/lib/clipboard";
 import { pageMeta } from "@aihot/web/lib/seo";
 import { PhoneBar } from "@aihot/web/components/shell/PhoneBar";
 import type { Screen } from "@aihot/web/components/shell/screens";
+import { compareCodes, LOADOUT_MODES, LOADOUT_SOURCES, loadoutApiSearch, parseLoadoutQuery } from "../query.ts";
 
 export const handle: Screen = { tab: "loadouts", name: "改枪" };
 
-const MODES = ["烽火地带", "全面战场", "黑潮爆破"] as const;
+const MODES = LOADOUT_MODES;
 const DESKTOP = "(min-width: 1024px)";
 const PARTS_SHOWN = 8;
 
@@ -80,7 +81,7 @@ interface Payload {
   note: string;
 }
 
-const SOURCES = ["官方热门", "鸟兽兽", "国服配装", "云码库", "洲械库"] as const;
+const SOURCES = LOADOUT_SOURCES;
 const SORTS = [
   { id: "popularity", label: "热度" },
   { id: "newest", label: "最新" },
@@ -95,8 +96,15 @@ interface ShownWeapon extends Weapon {
 }
 
 export async function loader({ request }: { request: Request }) {
-  return apiGet<Payload>("/api/loadouts", { signal: request.signal });
+  const search = loadoutApiSearch(new URL(request.url).searchParams);
+  return apiGet<Payload>(`/api/loadouts${search}`, { signal: request.signal });
 }
+
+/** 打开某一把枪只改 gun，列表数据不变，不必再请求。筛选变了才重新要。 */
+export const shouldRevalidate: ShouldRevalidateFunction = ({ currentUrl, nextUrl, defaultShouldRevalidate }) => {
+  if (currentUrl.pathname === nextUrl.pathname && loadoutApiSearch(currentUrl.searchParams) === loadoutApiSearch(nextUrl.searchParams)) return false;
+  return defaultShouldRevalidate;
+};
 
 export function meta({ loaderData }: { loaderData?: Payload }) {
   const name = loaderData?.game.name ?? "三角洲行动";
@@ -105,10 +113,6 @@ export function meta({ loaderData }: { loaderData?: Payload }) {
     description: `按${name}的枪械查看改枪码。枪图和整枪价来自官方改枪台，导入前请回游戏里核对。`,
     path: "/loadouts",
   });
-}
-
-function knownMode(value: string | null): (typeof MODES)[number] | null {
-  return MODES.find((mode) => mode === value) ?? null;
 }
 
 function playerhubPic(url: string | null): string | null {
@@ -175,41 +179,10 @@ function cardId(name: string): string {
   return `gun-card-${encodeURIComponent(name)}`;
 }
 
-function wanParam(value: string | null): number | null {
-  if (!value || !/^\d+(\.\d+)?$/.test(value)) return null;
-  const wan = Number(value);
-  if (!Number.isFinite(wan) || wan < 0) return null;
-  return Math.round(wan * 10000);
-}
-
 function tierRank(tier: string | null): number {
   if (!tier) return 99;
   const index = TIER_ORDER.indexOf(tier);
   return index === -1 ? 50 : index;
-}
-
-function authorlessYunmaku(code: LoadoutCode): boolean {
-  return !code.author && (code.sources.length ? code.sources : [{ label: code.source, url: null }]).every((item) => item.label === "云码库");
-}
-
-function compareCodes(a: LoadoutCode, b: LoadoutCode, sort: (typeof SORTS)[number]["id"]): number {
-  if (sort === "popularity") {
-    const byDemote = Number(authorlessYunmaku(a)) - Number(authorlessYunmaku(b));
-    if (byDemote) return byDemote;
-  }
-  if (sort === "newest") {
-    const aTime = a.notedAt ? -Date.parse(a.notedAt) : Number.POSITIVE_INFINITY;
-    const bTime = b.notedAt ? -Date.parse(b.notedAt) : Number.POSITIVE_INFINITY;
-    if (aTime !== bTime) return aTime - bTime;
-  }
-  if (sort === "price") {
-    const aPrice = a.total ?? Number.POSITIVE_INFINITY;
-    const bPrice = b.total ?? Number.POSITIVE_INFINITY;
-    if (aPrice !== bPrice) return aPrice - bPrice;
-  }
-  const byPop = (b.popularity ?? -1) - (a.popularity ?? -1);
-  if (byPop) return byPop;
-  return b.id - a.id;
 }
 
 function compareWeapons(a: ShownWeapon, b: ShownWeapon, sort: (typeof SORTS)[number]["id"], codesOf: (weapon: ShownWeapon) => LoadoutCode[]): number {
@@ -236,36 +209,15 @@ function compareWeapons(a: ShownWeapon, b: ShownWeapon, sort: (typeof SORTS)[num
   return a.name.localeCompare(b.name, "zh");
 }
 
-function matchesQuery(weapon: ShownWeapon, code: LoadoutCode, query: string): boolean {
-  if (!query) return true;
-  const haystack = `${weapon.name} ${code.author ?? ""}`.normalize("NFKC").toLowerCase();
-  return haystack.includes(query);
-}
-
 export default function LoadoutsPage() {
   const { game, season, categories, note } = useLoaderData<typeof loader>();
   const [searchParams, setSearchParams] = useSearchParams();
-  const categoryKey = searchParams.get("category");
-  const mode = knownMode(searchParams.get("mode"));
+  const listQuery = parseLoadoutQuery(searchParams);
+  const { category: categoryKey, mode, source, tier, sort, pending: pendingOnly } = listQuery;
   const gunName = searchParams.get("gun");
-  const source = SOURCES.find((item) => item === searchParams.get("source")) ?? null;
-  const tier = searchParams.get("tier");
-  const sort = SORTS.find((item) => item.id === searchParams.get("sort"))?.id ?? "popularity";
-  const query = (searchParams.get("q") ?? "").normalize("NFKC").trim().toLowerCase();
-  const pendingOnly = searchParams.get("pending") === "1";
-  const minPrice = wanParam(searchParams.get("min"));
-  const maxPrice = wanParam(searchParams.get("max"));
   const category = categories.find((item) => item.key === categoryKey) ?? null;
   const weapons: ShownWeapon[] = categories.flatMap((item) => item.weapons.map((weapon) => ({ ...weapon, categoryKey: item.key, categoryLabel: item.label })));
-  const visibleCodes = (weapon: ShownWeapon) => weapon.codes.filter((code) => {
-    if (mode && code.mode !== mode) return false;
-    if (source && !code.sources.some((item) => item.label === source) && code.source !== source) return false;
-    if (pendingOnly && code.verification !== "pending" && code.verification !== "removed") return false;
-    if (minPrice != null && (code.total == null || code.total < minPrice)) return false;
-    if (maxPrice != null && (code.total == null || code.total > maxPrice)) return false;
-    if (!matchesQuery(weapon, code, query)) return false;
-    return true;
-  }).sort((a, b) => compareCodes(a, b, sort));
+  const visibleCodes = (weapon: ShownWeapon) => [...weapon.codes].sort((a, b) => compareCodes(a, b, sort));
   const cards = weapons
     .filter((weapon) => (category ? weapon.categoryKey === category.key : true))
     .filter((weapon) => !tier || weapon.tier === tier)

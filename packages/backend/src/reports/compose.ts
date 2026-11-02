@@ -92,9 +92,10 @@ export async function composeDaily(date: string, reason?: string): Promise<{ key
   const end = beijingAt(date, EDITION_TIMES.daily);
   const start = new Date(end.getTime() - 86400000);
   const edition = await dailyEdition(date, start, end);
-  // No articles in the window is a quiet skip: few sources have empty days, and that is not a failed run.
-  // Articles that are still unjudged stay an error so catch-up retries them. Returning null does not
-  // write the issue, so a later article in the same window is still composed.
+  // Nothing selected and nothing scored in this window: skip. That covers an empty window and a window
+  // whose articles are already finished but produced no score here (their timeline landed on another
+  // day, or none of them was selected). Returning null does not write the issue, so a later article
+  // in the same window is still composed. Only articles still waiting (new or failed) are an error.
   if (edition.entries.length === 0 && edition.stats.judgedReports === 0) {
     if (edition.stats.windowArticles > 0) throw new Error(`daily ${date}: nothing judged in its window`);
     console.log(JSON.stringify({ level: "info", msg: "daily skipped", date, reason: "empty window" }));

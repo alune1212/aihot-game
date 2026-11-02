@@ -145,15 +145,15 @@ test("authorless yunmaku with no other source and no official detail ranks last 
   assert.equal(namedRow?.code, named);
 });
 
-test("a code that is not on the official list is pending, and a bad gun name is pending even without the list", () => {
-  assert.equal(judgeVerification({
+test("a code that is not on the official list is pending, and a missing list keeps the previous status", () => {
+  const community = {
     code: "K416突击步枪-烽火地带-6COMMUNITYCODE1234",
     weapon: "K416突击步枪",
     hasDetail: false,
-    officialListKnown: true,
     onOfficialList: false,
     feedSources: [{ absent: false }],
-  }), "pending");
+  };
+  assert.equal(judgeVerification({ ...community, officialListKnown: true, previous: "ok" }), "pending");
   assert.equal(judgeVerification({
     code: "没这把枪-烽火地带-6BADGUNCODE1234567",
     weapon: "K416突击步枪",
@@ -161,7 +161,11 @@ test("a code that is not on the official list is pending, and a bad gun name is 
     officialListKnown: false,
     onOfficialList: false,
     feedSources: [],
+    previous: null,
   }), "pending");
+  assert.equal(judgeVerification({ ...community, officialListKnown: false, previous: "pending" }), "pending");
+  assert.equal(judgeVerification({ ...community, officialListKnown: false, previous: "ok" }), "ok");
+  assert.equal(judgeVerification({ ...community, officialListKnown: false, previous: "removed" }), "removed");
   assert.equal(judgeVerification({
     code: "K416突击步枪-烽火地带-6ONTHELISTCODE12345",
     weapon: "K416突击步枪",
@@ -169,6 +173,7 @@ test("a code that is not on the official list is pending, and a bad gun name is 
     officialListKnown: true,
     onOfficialList: true,
     feedSources: [{ absent: false }],
+    previous: "pending",
   }), "ok");
   assert.equal(judgeVerification({
     code: "K416突击步枪-烽火地带-6REMOVEDCODE1234567",
@@ -177,6 +182,7 @@ test("a code that is not on the official list is pending, and a bad gun name is 
     officialListKnown: true,
     onOfficialList: false,
     feedSources: [{ absent: true }],
+    previous: "pending",
   }), "removed");
 });
 

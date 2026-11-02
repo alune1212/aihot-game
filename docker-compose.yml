@@ -56,6 +56,19 @@ services:
       setup:
         condition: service_completed_successfully
 
+  # Linux creates a missing ./backups as root:root. The worker is USER node and cannot pg_dump into it.
+  # This runs as root, chowns the directory only when node cannot already write (a Mac checkout that
+  # already works is left alone), then exits. The worker itself stays user node.
+  backup-dir:
+    <<: *app
+    user: "0:0"
+    restart: "no"
+    environment:
+      DB_BACKUP_LOCAL_DIR: /var/backups/aihot
+    volumes:
+      - ./backups:/var/backups/aihot
+    command: ["node", "scripts/ensure-backup-dir.ts"]
+
   worker:
     <<: *backend
     command: ["node", "apps/worker/src/main.ts"]
@@ -71,6 +84,8 @@ services:
     stop_grace_period: 515s
     depends_on:
       setup:
+        condition: service_completed_successfully
+      backup-dir:
         condition: service_completed_successfully
 
   web:
