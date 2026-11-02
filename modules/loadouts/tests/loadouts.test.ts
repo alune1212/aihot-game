@@ -3,6 +3,7 @@ import { after, test } from "node:test";
 import { closeDb, sql } from "@aihot/backend/db";
 import { isWeaponListed, WEAPON_CATEGORIES } from "../catalog.ts";
 import { extractLoadouts } from "../extract.ts";
+import { LOADOUT_PER_WEAPON, shapeLoadoutCategories, type LoadoutListQuery } from "../query.ts";
 import { listLoadouts, syncArticleLoadouts } from "../store.ts";
 
 after(closeDb);
@@ -49,4 +50,52 @@ test("sync stores the code under its weapon and drops it when the article is wit
   const after = await listLoadouts(sql);
   const empty = after.categories.find((category) => category.key === "dmr")!.weapons.find((weapon) => weapon.name === "SR-25射手步枪")!;
   assert.deepEqual(empty.codes, []);
+});
+
+test("filters and sorts run before the per-weapon cap", async () => {
+  const hidden = {
+    id: LOADOUT_PER_WEAPON + 1,
+    mode: "全面战场",
+    author: "稀有作者",
+    source: "鸟兽兽",
+    sources: [{ label: "鸟兽兽" }],
+    notedAt: "2026-11-02T00:00:00.000Z",
+    verification: "pending" as const,
+    popularity: 0,
+    total: 1000,
+  };
+  const codes = [
+    ...Array.from({ length: LOADOUT_PER_WEAPON }, (_, index) => ({
+      id: index + 1,
+      mode: "烽火地带",
+      author: "路人",
+      source: "云码库",
+      sources: [{ label: "云码库" }],
+      notedAt: "2026-10-01T00:00:00.000Z",
+      verification: "ok" as const,
+      popularity: 100,
+      total: 500_000,
+    })),
+    hidden,
+  ];
+  const categories = [{ key: "rifle", label: "步枪", note: "", weapons: [{ name: "M4A1突击步枪", tier: "A", codes }] }];
+  const base: LoadoutListQuery = {
+    category: null, mode: null, source: null, tier: null, sort: "popularity", q: "", pending: false, minPrice: null, maxPrice: null,
+  };
+  const listed = async (query: Partial<LoadoutListQuery>) => (
+    await shapeLoadoutCategories(categories, { ...base, ...query }, async (rows) => rows)
+  )[0]!.weapons[0]!.codes;
+  const popular = await listed({});
+  assert.equal(popular.length, LOADOUT_PER_WEAPON);
+  assert.equal(popular.some((code) => code.author === "稀有作者"), false);
+  assert.equal((await listed({ q: "稀有作者" })).some((code) => code.id === hidden.id), true);
+  assert.equal((await listed({ source: "鸟兽兽" }))[0]?.id, hidden.id);
+  assert.equal((await listed({ mode: "全面战场" }))[0]?.id, hidden.id);
+  assert.equal((await listed({ pending: true }))[0]?.id, hidden.id);
+  assert.equal((await listed({ sort: "newest" }))[0]?.id, hidden.id);
+  assert.equal((await listed({ sort: "price" }))[0]?.id, hidden.id);
+  assert.equal((await listed({ maxPrice: 2000 })).map((code) => code.id).includes(hidden.id), true);
+  assert.equal((await listed({ category: "smg" })).length, 0);
+  assert.equal((await listed({ tier: "S" })).length, 0);
+  assert.equal((await listed({ tier: "A", q: "稀有作者" }))[0]?.id, hidden.id);
 });

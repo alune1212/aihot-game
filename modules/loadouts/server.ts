@@ -8,6 +8,7 @@ import { fetchLoadoutFeeds } from "./fetch.ts";
 import { cleanupOutOfSeason } from "./cleanup.ts";
 import { BALANCE_SEASON_NOTE, feedEnabled } from "./feeds.ts";
 import { currentSeason, detectSeason, seasonLabel, type StoredSeason } from "./season.ts";
+import { parseLoadoutQuery, shapeLoadoutCategories } from "./query.ts";
 import { listLoadouts, syncArticleLoadouts } from "./store.ts";
 import { verifyLoadouts } from "./verify.ts";
 
@@ -24,14 +25,16 @@ export default defineServerModule({
   http(app: FastifyInstance) {
     app.get("/api/loadouts", async (req, reply) => {
       const game = typeof (req.query as { game?: unknown }).game === "string" ? (req.query as { game: string }).game : GAME_ID;
+      const query = parseLoadoutQuery(new URL(req.url, "http://localhost").searchParams);
       reply.header("cache-control", "public, max-age=60");
       const season = await currentSeason(sql);
-      const listed = await listLoadouts(sql, game === GAME_ID ? GAME_ID : game);
+      const listed = await listLoadouts(sql, game === GAME_ID ? GAME_ID : game, null);
+      const categories = await shapeLoadoutCategories(listed.categories, query, (rows) => priceLoadoutList(sql, rows));
       return {
         game: { id: GAME_ID, name: GAME_NAME },
         season: { name: season.name, number: season.number, startsOn: season.startsOn, label: seasonLabel(season), confidence: season.confidence },
-        ...listed,
-        categories: await priceLoadoutList(sql, listed.categories),
+        gameId: listed.gameId,
+        categories,
         note: seasonNote(season),
       };
     });
