@@ -59,6 +59,13 @@ services:
   worker:
     <<: *backend
     command: ["node", "apps/worker/src/main.ts"]
+    environment:
+      <<: *backend-env
+      # Host folder ./backups. Dumps are written only when DB_BACKUP_LOCAL=true.
+      DB_BACKUP_LOCAL_DIR: /var/backups/aihot
+    volumes:
+      - data:/data
+      - ./backups:/var/backups/aihot
     # Let the worker drain backups and paid calls (STOP_TIMEOUT_MS, 470 s), then close its database.
     # Docker sends SIGTERM to the worker first; after this window it kills the remaining processes.
     stop_grace_period: 515s

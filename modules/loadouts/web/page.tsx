@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { useLoaderData, useSearchParams } from "react-router";
 import { apiGet } from "@aihot/web/lib/api.server";
 import { copyText } from "@aihot/web/lib/clipboard";
@@ -31,10 +31,13 @@ interface LoadoutCode {
   source: string | null;
   sourceUrl: string | null;
   sources: ShownSource[];
+  notedAt: string | null;
   popularityText: string | null;
   likesText: string | null;
   featured: boolean;
   stale: boolean;
+  verification: "ok" | "pending" | "removed" | null;
+  popularity: number | null;
   totalText: string | null;
   total: number | null;
   name: string | null;
@@ -62,11 +65,29 @@ interface Category {
   weapons: Weapon[];
 }
 
+interface SeasonInfo {
+  name: string;
+  number: number | null;
+  startsOn: string;
+  label: string;
+  confidence: "certain" | "uncertain";
+}
+
 interface Payload {
   game: { id: string; name: string };
+  season?: SeasonInfo;
   categories: Category[];
   note: string;
 }
+
+const SOURCES = ["官方热门", "鸟兽兽", "国服配装", "云码库", "洲械库"] as const;
+const SORTS = [
+  { id: "popularity", label: "热度" },
+  { id: "newest", label: "最新" },
+  { id: "price", label: "价格" },
+  { id: "tier", label: "梯队" },
+] as const;
+const TIER_ORDER = ["S+", "S", "A", "B", "C", "D"];
 
 interface ShownWeapon extends Weapon {
   categoryKey: string;
@@ -154,23 +175,110 @@ function cardId(name: string): string {
   return `gun-card-${encodeURIComponent(name)}`;
 }
 
+function wanParam(value: string | null): number | null {
+  if (!value || !/^\d+(\.\d+)?$/.test(value)) return null;
+  const wan = Number(value);
+  if (!Number.isFinite(wan) || wan < 0) return null;
+  return Math.round(wan * 10000);
+}
+
+function tierRank(tier: string | null): number {
+  if (!tier) return 99;
+  const index = TIER_ORDER.indexOf(tier);
+  return index === -1 ? 50 : index;
+}
+
+function authorlessYunmaku(code: LoadoutCode): boolean {
+  return !code.author && (code.sources.length ? code.sources : [{ label: code.source, url: null }]).every((item) => item.label === "云码库");
+}
+
+function compareCodes(a: LoadoutCode, b: LoadoutCode, sort: (typeof SORTS)[number]["id"]): number {
+  if (sort === "popularity") {
+    const byDemote = Number(authorlessYunmaku(a)) - Number(authorlessYunmaku(b));
+    if (byDemote) return byDemote;
+  }
+  if (sort === "newest") {
+    const aTime = a.notedAt ? -Date.parse(a.notedAt) : Number.POSITIVE_INFINITY;
+    const bTime = b.notedAt ? -Date.parse(b.notedAt) : Number.POSITIVE_INFINITY;
+    if (aTime !== bTime) return aTime - bTime;
+  }
+  if (sort === "price") {
+    const aPrice = a.total ?? Number.POSITIVE_INFINITY;
+    const bPrice = b.total ?? Number.POSITIVE_INFINITY;
+    if (aPrice !== bPrice) return aPrice - bPrice;
+  }
+  const byPop = (b.popularity ?? -1) - (a.popularity ?? -1);
+  if (byPop) return byPop;
+  return b.id - a.id;
+}
+
+function compareWeapons(a: ShownWeapon, b: ShownWeapon, sort: (typeof SORTS)[number]["id"], codesOf: (weapon: ShownWeapon) => LoadoutCode[]): number {
+  if (sort === "tier") {
+    const byTier = tierRank(a.tier) - tierRank(b.tier);
+    if (byTier) return byTier;
+  }
+  if (sort === "price") {
+    const aPrice = lowestTotal(codesOf(a)) ?? Number.POSITIVE_INFINITY;
+    const bPrice = lowestTotal(codesOf(b)) ?? Number.POSITIVE_INFINITY;
+    if (aPrice !== bPrice) return aPrice - bPrice;
+  }
+  if (sort === "newest") {
+    const newest = (weapon: ShownWeapon) => {
+      const times = codesOf(weapon).map((code) => code.notedAt ? Date.parse(code.notedAt) : 0);
+      return times.length ? Math.max(...times) : 0;
+    };
+    const byTime = newest(b) - newest(a);
+    if (byTime) return byTime;
+  }
+  const pop = (weapon: ShownWeapon) => Math.max(-1, ...codesOf(weapon).map((code) => code.popularity ?? -1));
+  const byPop = pop(b) - pop(a);
+  if (byPop) return byPop;
+  return a.name.localeCompare(b.name, "zh");
+}
+
+function matchesQuery(weapon: ShownWeapon, code: LoadoutCode, query: string): boolean {
+  if (!query) return true;
+  const haystack = `${weapon.name} ${code.author ?? ""}`.normalize("NFKC").toLowerCase();
+  return haystack.includes(query);
+}
+
 export default function LoadoutsPage() {
-  const { game, categories, note } = useLoaderData<typeof loader>();
+  const { game, season, categories, note } = useLoaderData<typeof loader>();
   const [searchParams, setSearchParams] = useSearchParams();
   const categoryKey = searchParams.get("category");
   const mode = knownMode(searchParams.get("mode"));
   const gunName = searchParams.get("gun");
+  const source = SOURCES.find((item) => item === searchParams.get("source")) ?? null;
+  const tier = searchParams.get("tier");
+  const sort = SORTS.find((item) => item.id === searchParams.get("sort"))?.id ?? "popularity";
+  const query = (searchParams.get("q") ?? "").normalize("NFKC").trim().toLowerCase();
+  const pendingOnly = searchParams.get("pending") === "1";
+  const minPrice = wanParam(searchParams.get("min"));
+  const maxPrice = wanParam(searchParams.get("max"));
   const category = categories.find((item) => item.key === categoryKey) ?? null;
   const weapons: ShownWeapon[] = categories.flatMap((item) => item.weapons.map((weapon) => ({ ...weapon, categoryKey: item.key, categoryLabel: item.label })));
-  const inMode = (weapon: ShownWeapon) => weapon.codes.filter((code) => !mode || code.mode === mode);
-  const cards = weapons.filter((weapon) => (category ? weapon.categoryKey === category.key : true) && inMode(weapon).length > 0);
+  const visibleCodes = (weapon: ShownWeapon) => weapon.codes.filter((code) => {
+    if (mode && code.mode !== mode) return false;
+    if (source && !code.sources.some((item) => item.label === source) && code.source !== source) return false;
+    if (pendingOnly && code.verification !== "pending" && code.verification !== "removed") return false;
+    if (minPrice != null && (code.total == null || code.total < minPrice)) return false;
+    if (maxPrice != null && (code.total == null || code.total > maxPrice)) return false;
+    if (!matchesQuery(weapon, code, query)) return false;
+    return true;
+  }).sort((a, b) => compareCodes(a, b, sort));
+  const cards = weapons
+    .filter((weapon) => (category ? weapon.categoryKey === category.key : true))
+    .filter((weapon) => !tier || weapon.tier === tier)
+    .filter((weapon) => visibleCodes(weapon).length > 0)
+    .sort((a, b) => compareWeapons(a, b, sort, visibleCodes));
   const selected = weapons.find((weapon) => weapon.name === gunName) ?? null;
-  const selectedCodes = selected ? inMode(selected) : [];
-  const shownCount = cards.reduce((sum, weapon) => sum + inMode(weapon).length, 0);
+  const selectedCodes = selected ? visibleCodes(selected) : [];
+  const shownCount = cards.reduce((sum, weapon) => sum + visibleCodes(weapon).length, 0);
+  const tiers = [...new Set(weapons.map((weapon) => weapon.tier).filter((item): item is string => !!item))].sort((a, b) => tierRank(a) - tierRank(b) || a.localeCompare(b, "zh"));
   const asideClose = useRef<HTMLButtonElement>(null);
   const closeDrawerRef = useRef<() => void>(() => {});
 
-  function patch(next: { category?: string | null; mode?: string | null; gun?: string | null }) {
+  function patch(next: Record<string, string | null>) {
     const params = new URLSearchParams(searchParams);
     for (const [key, value] of Object.entries(next)) {
       if (value) params.set(key, value);
@@ -206,7 +314,9 @@ export default function LoadoutsPage() {
           <header className="pb-2 pt-3 lg:pt-1">
             <h1 data-page-title="" className="text-[24px] font-semibold leading-[1.3] text-ink">改枪码</h1>
             <p className="mt-1.5 text-[14px] leading-relaxed text-ink-3">
-              按{game.name}的枪械浏览。当前 <span className="num">{shownCount}</span> 条。枪图和整枪价来自官方改枪台，没有官方价显示 —。
+              按{game.name}的枪械浏览。当前 <span className="num">{shownCount}</span> 条。
+              {season ? <span>{season.confidence === "certain" ? `当前赛季 ${season.label}，${season.startsOn} 起。` : `赛季未确认，暂按 ${season.label}（${season.startsOn}）。`}</span> : null}
+              枪图和整枪价来自官方改枪台，没有官方价显示 —。
             </p>
             <p className="mt-1 text-[13px] leading-relaxed text-ink-4">{note}</p>
           </header>
@@ -221,11 +331,41 @@ export default function LoadoutsPage() {
               <Chip key={item} pressed={item === mode} square onClick={() => patch({ mode: item })}>{item}</Chip>
             ))}
           </div>
+          <div className="mt-2 flex flex-wrap items-center gap-2" role="group" aria-label="更多筛选">
+            <label className="min-w-[8rem] flex-1">
+              <span className="sr-only">搜索作者或枪名</span>
+              <input
+                value={searchParams.get("q") ?? ""}
+                placeholder="作者、主播或枪名"
+                className="w-full rounded-control border border-line bg-surface px-3 py-1.5 text-[13px] text-ink placeholder:text-ink-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                onChange={(event) => patch({ q: event.target.value ? event.target.value : null })}
+              />
+            </label>
+            <FilterSelect label="排序" value={sort} onChange={(value) => patch({ sort: value === "popularity" ? null : value })}>
+              {SORTS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+            </FilterSelect>
+            <FilterSelect label="来源" value={source ?? ""} onChange={(value) => patch({ source: value || null })}>
+              <option value="">全部来源</option>
+              {SOURCES.map((item) => <option key={item} value={item}>{item}</option>)}
+            </FilterSelect>
+            <FilterSelect label="梯队" value={tier ?? ""} onChange={(value) => patch({ tier: value || null })}>
+              <option value="">全部梯队</option>
+              {tiers.map((item) => <option key={item} value={item}>聪聪 {item}</option>)}
+            </FilterSelect>
+            <label className="flex items-center gap-1 text-[13px] text-ink-2">
+              <span className="sr-only">最低价，单位万</span>
+              <input inputMode="decimal" value={searchParams.get("min") ?? ""} placeholder="最低万" className="w-16 rounded-control border border-line bg-surface px-2 py-1.5 text-[13px] text-ink placeholder:text-ink-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent" onChange={(event) => patch({ min: event.target.value.trim() || null })} />
+              <span aria-hidden="true">–</span>
+              <span className="sr-only">最高价，单位万</span>
+              <input inputMode="decimal" value={searchParams.get("max") ?? ""} placeholder="最高万" className="w-16 rounded-control border border-line bg-surface px-2 py-1.5 text-[13px] text-ink placeholder:text-ink-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent" onChange={(event) => patch({ max: event.target.value.trim() || null })} />
+            </label>
+            <Chip pressed={pendingOnly} square onClick={() => patch({ pending: pendingOnly ? null : "1" })}>待验证</Chip>
+          </div>
           {category?.note ? <p className="mt-3 text-[12px] text-ink-4">{category.note}</p> : null}
           {cards.length ? (
             <div className="armory-grid mt-4">
               {cards.map((weapon, index) => {
-                const codes = inMode(weapon);
+                const codes = visibleCodes(weapon);
                 const on = weapon.name === selected?.name;
                 const pic = playerhubPic(weapon.pic);
                 return (
@@ -293,6 +433,22 @@ export default function LoadoutsPage() {
         }
       `}</style>
     </div>
+  );
+}
+
+function FilterSelect({ label, value, onChange, children }: { label: string; value: string; onChange: (value: string) => void; children: ReactNode }) {
+  return (
+    <label className="text-[13px] text-ink-2">
+      <span className="sr-only">{label}</span>
+      <select
+        aria-label={label}
+        value={value}
+        className="rounded-control border border-line bg-surface px-2 py-1.5 text-[13px] text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+        onChange={(event) => onChange(event.target.value)}
+      >
+        {children}
+      </select>
+    </label>
   );
 }
 
@@ -370,6 +526,8 @@ function SchemeCard({ code }: { code: LoadoutCode }) {
         {code.likesText ? <span className="rounded-mark border border-line px-1.5 py-0.5 text-ink-2">{code.likesText}</span> : null}
         {code.featured ? <span className="rounded-mark bg-amber-soft px-1.5 py-0.5 font-semibold text-amber-ink">主播</span> : null}
         {code.stale ? <span className="rounded-mark border border-line px-1.5 py-0.5 text-ink-4">过季</span> : null}
+        {code.verification === "pending" ? <span className="text-[11px] text-ink-4">待验证</span> : null}
+        {code.verification === "removed" ? <span className="text-[11px] text-ink-4">源站已撤</span> : null}
         <SourceMarks code={code} />
       </div>
       {code.parts.length ? (

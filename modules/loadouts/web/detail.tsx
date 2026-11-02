@@ -65,6 +65,8 @@ interface Payload {
     likesText: string | null;
     featured: boolean;
     stale: boolean;
+    verification: "ok" | "pending" | "removed" | null;
+    decodeStatus: "official" | "decoded" | "opaque" | null;
   };
   balance: {
     tier: string | null;
@@ -253,6 +255,8 @@ export default function LoadoutDetailPage() {
             {balance.tier ? <span className={`rounded-mark px-1.5 py-0.5 text-[12px] font-semibold ${tierClass(balance.tier)}`} title={`聪聪强度梯队${balance.tierAsOf ? `，${balance.tierAsOf} 更新` : ""}。社区排名，不是官方`}>聪聪 {balance.tier}</span> : null}
             {code.featured ? <span className="rounded-mark bg-amber-soft px-1.5 py-0.5 text-[12px] font-semibold text-amber-ink">主播</span> : null}
             {code.stale ? <span className="rounded-mark border border-line px-1.5 py-0.5 text-[12px] text-ink-4">过季</span> : null}
+            {code.verification === "pending" ? <span className="text-[12px] text-ink-4">待验证</span> : null}
+            {code.verification === "removed" ? <span className="text-[12px] text-ink-4">源站已撤</span> : null}
           </div>
           {detail ? (
             <p className="text-[13px] text-ink-3">
@@ -288,8 +292,8 @@ export default function LoadoutDetailPage() {
             </>
           ) : (
             <p className="rounded-tile border border-line bg-surface px-3 py-2.5 text-[13px] leading-relaxed text-ink">
-              <strong className="font-semibold">暂无官方配件详情，可在游戏内改枪台导入查看。</strong>
-              <span className="mt-1 block text-ink-3">这条码还没对上官方方案，配件、属性和交易行价格先留空。</span>
+              <strong className="font-semibold">解不出配件。</strong>
+              <span className="mt-1 block text-ink-3">这条码不在官方方案里。码尾不是配件编号的公开编码，所以没有配件、价格和改装属性，这里不会猜一套。</span>
             </p>
           )}
         </div>

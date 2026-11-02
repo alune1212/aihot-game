@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
 import { once } from "node:events";
 import { createHash, randomBytes } from "node:crypto";
-import { chmod, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, beforeEach, test } from "node:test";
@@ -15,7 +15,7 @@ import { promisify } from "node:util";
 import sharp from "sharp";
 import { config } from "@aihot/backend/config";
 import { closeDb, sql } from "@aihot/backend/db";
-import { runBackup } from "@aihot/backend/operations/backup";
+import { rotateLocalBackups, runBackup, runLocalBackup } from "@aihot/backend/operations/backup";
 import { submitFeedback } from "@aihot/backend/operations/feedback";
 
 const run = promisify(execFile);
@@ -361,4 +361,19 @@ test("a real dump preserves libpq query parameter escaping", async () => {
   config.databaseUrl = `${originalUrl}${originalUrl.includes("?") ? "&" : "?"}options=-c%20statement_timeout%3D0&application_name=fictional%2Bbackup`;
   try { assert.equal((await runBackup(NOW)).uploaded, true); }
   finally { config.databaseUrl = originalUrl; }
+});
+
+test("local backups stay off unless asked, and old dumps in that folder are removed", async () => {
+  assert.equal(await runLocalBackup(NOW, { ...process.env, DB_BACKUP_LOCAL: "false" }), null);
+  const dir = await mkdtemp(path.join(tmpdir(), "aihot-local-backup-"));
+  roots.push(dir);
+  const old = path.join(dir, "aihot-2020-01-01.dump");
+  const keep = path.join(dir, "aihot-2026-11-01.dump");
+  await writeFile(old, "old");
+  await writeFile(keep, "new");
+  const ancient = new Date("2020-01-02T00:00:00Z");
+  await utimes(old, ancient, ancient);
+  const removed = await rotateLocalBackups(dir, 14, NOW);
+  assert.deepEqual(removed, ["aihot-2020-01-01.dump"]);
+  assert.equal((await readdir(dir)).includes("aihot-2026-11-01.dump"), true);
 });

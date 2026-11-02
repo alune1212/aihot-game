@@ -2,15 +2,17 @@
 // 请求走 guardedFetch：设了 EGRESS_PROXY_URL 就走出网代理，.cn 按框架规则直连。
 // 有力气的表在 supabase.co，不是 .cn：没设代理就直连，设了就走代理。anon key 放在请求头里，不进 URL。
 import { SITE } from "@aihot/site";
+import { beijingDate } from "@aihot/contracts/time";
 import { guardedFetch } from "@aihot/backend/lib/http-fetch";
 import { sql } from "@aihot/backend/db";
 import { decideLoadout, mergeRaw, type FeedRow, type RawLoadout } from "./codes.ts";
-import { OFFICIAL_FEED_ID, SJZGQ_HOME, YUFAN_API_ORIGIN, YUFAN_ORIGIN, YUFAN_PAGE, YUFAN_ROW_CAP, YUNMAKU_MODES, YUNMAKU_ORIGIN, yufanApiHeaders, yufanCodesUrl, yunmakuListUrl } from "./feeds.ts";
+import { OFFICIAL_FEED_ID, SEASON_START, SJZGQ_HOME, YUFAN_API_ORIGIN, YUFAN_ORIGIN, YUFAN_PAGE, YUFAN_ROW_CAP, YUNMAKU_MODES, YUNMAKU_ORIGIN, yufanApiHeaders, yufanCodesUrl, yunmakuListUrl } from "./feeds.ts";
 import { parseSjzgqCatalog, parseSjzgqHtml, sjzgqScriptUrl } from "./parse-sjzgq.ts";
 import { parseYufan } from "./parse-yufan.ts";
 import { parseYunmaku } from "./parse-yunmaku.ts";
 import { mayFetch } from "./robots.ts";
-import { noteStaleLoadouts, recordFeedFailure, recordFeedSuccess, saveFeedLoadout } from "./store.ts";
+import { seasonFloor } from "./season.ts";
+import { dropBareYunmaku, noteStaleLoadouts, reconcileFeedSources, recordFeedFailure, recordFeedSuccess, saveFeedLoadout } from "./store.ts";
 
 const REQUEST_GAP_MS = 1200;
 /** shortcut: 一个模式最多 40 页，云码库烽火现在约 25 页；超过就先抬这里。 */
@@ -58,14 +60,14 @@ function allow(status: number, body: string, url: string): boolean {
   return mayFetch(status, body, url, SITE.crawlerName);
 }
 
-function classify(raws: readonly RawLoadout[]): Gathered {
+function classify(raws: readonly RawLoadout[], seasonStart = SEASON_START): Gathered {
   const rows: FeedRow[] = [];
   const stale: FeedRow[] = [];
   const rejected = { shape: 0, international: 0, unmapped: 0 };
   const unmapped: string[] = [];
   const byMode: Record<string, number> = {};
   for (const raw of mergeRaw(raws)) {
-    const decision = decideLoadout(raw);
+    const decision = decideLoadout(raw, seasonStart);
     if (decision.ok) {
       rows.push(decision.row);
       byMode[decision.row.mode] = (byMode[decision.row.mode] ?? 0) + 1;
@@ -92,7 +94,7 @@ async function pullAllowed(
 }
 
 /** 云码库：首页 + 三个国服模式的列表页（分页跟页面上的 page=）。 */
-export async function gatherYunmaku(fetchPage: PageFetch, sleep: (ms: number) => Promise<void>): Promise<Gathered> {
+export async function gatherYunmaku(fetchPage: PageFetch, sleep: (ms: number) => Promise<void>, seasonStart = SEASON_START): Promise<Gathered> {
   const robots = await robotsOf(fetchPage, sleep, `${YUNMAKU_ORIGIN}/robots.txt`);
   const pages: Array<{ url: string; html: string }> = [];
   let warning: string | null = null;
@@ -135,11 +137,11 @@ export async function gatherYunmaku(fetchPage: PageFetch, sleep: (ms: number) =>
   if (!pages.length) throw new Error(warning ?? "robots.txt 不允许抓取云码库改枪码");
   const raws = pages.flatMap((page) => parseYunmaku(page.html, page.url));
   if (!raws.length && pages.some((page) => /<code\b|hot-card|loadout-grid/i.test(page.html))) throw new Error("云码库页面结构变了，没有抽出改枪码");
-  return { ...classify(raws), warning };
+  return { ...classify(raws, seasonStart), warning };
 }
 
 /** 洲械库：首页 HTML，再加上它引用的目录脚本。脚本失败时仍保留首页那一页。 */
-export async function gatherSjzgq(fetchPage: PageFetch, sleep: (ms: number) => Promise<void>): Promise<Gathered> {
+export async function gatherSjzgq(fetchPage: PageFetch, sleep: (ms: number) => Promise<void>, seasonStart = SEASON_START): Promise<Gathered> {
   const robots = await robotsOf(fetchPage, sleep, new URL("/robots.txt", SJZGQ_HOME).toString());
   if (!allow(robots.status, robots.body, SJZGQ_HOME)) throw new Error("robots.txt 不允许抓取洲械库");
   const html = await readPage(fetchPage, sleep, SJZGQ_HOME);
@@ -159,11 +161,11 @@ export async function gatherSjzgq(fetchPage: PageFetch, sleep: (ms: number) => P
     warning = "robots.txt 不允许抓取洲械库目录脚本，这一轮只用了首页";
   }
   if (!raws.length) throw new Error(/loadout-row/.test(html) ? "洲械库页面结构变了，没有抽出改枪码" : warning ?? "洲械库页面里没有改枪码");
-  return { ...classify(raws), warning };
+  return { ...classify(raws, seasonStart), warning };
 }
 
 /** 有力气：官方热门的公开表。页面 robots 和接口所在主机的 robots 都要允许。 */
-export async function gatherYufan(fetchPage: PageFetch, sleep: (ms: number) => Promise<void>): Promise<Gathered> {
+export async function gatherYufan(fetchPage: PageFetch, sleep: (ms: number) => Promise<void>, seasonStart = SEASON_START): Promise<Gathered> {
   const siteRobots = await robotsOf(fetchPage, sleep, new URL("/robots.txt", YUFAN_ORIGIN).toString());
   if (!allow(siteRobots.status, siteRobots.body, YUFAN_PAGE)) throw new Error("robots.txt 不允许抓取有力气");
   const apiRobots = await robotsOf(fetchPage, sleep, new URL("/robots.txt", YUFAN_API_ORIGIN).toString());
@@ -172,7 +174,7 @@ export async function gatherYufan(fetchPage: PageFetch, sleep: (ms: number) => P
   const body = await readPage(fetchPage, sleep, apiUrl, { headers: yufanApiHeaders() });
   const parsed = parseYufan(body, YUFAN_PAGE);
   if (!parsed.raws.length) throw new Error("有力气接口里没有改枪码");
-  const gathered = classify(parsed.raws);
+  const gathered = classify(parsed.raws, seasonStart);
   if (parsed.rows >= YUFAN_ROW_CAP) gathered.warning = `有力气返回了 ${YUFAN_ROW_CAP} 条，可能还有没抓完的`;
   return gathered;
 }
@@ -207,10 +209,11 @@ export async function fetchLoadoutFeeds(deps: { fetch?: PageFetch; sleep?: (ms: 
   const fetchPage = deps.fetch ?? defaultFetch;
   const sleep = deps.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
   const now = deps.now ?? (() => new Date());
+  const startsOn = await seasonFloor(sql, beijingDate(now()));
   const summary: Record<string, unknown> = {};
   for (const source of SOURCES) {
     try {
-      const gathered = await source.gather(fetchPage, sleep);
+      const gathered = await source.gather(fetchPage, sleep, startsOn);
       const fetchedAt = now();
       const counts = { inserted: 0, updated: 0, kept: 0, staleNoted: 0 };
       for (const row of gathered.rows) {
@@ -218,6 +221,10 @@ export async function fetchLoadoutFeeds(deps: { fetch?: PageFetch; sleep?: (ms: 
         counts[result] += 1;
       }
       counts.staleNoted = await noteStaleLoadouts(sql, source.id, gathered.stale);
+      if (!gathered.warning) {
+        const listed = [...gathered.rows, ...gathered.stale].map((row) => row.code);
+        await reconcileFeedSources(sql, source.id, listed);
+      }
       const note = summarize(source.name, gathered, counts);
       await recordFeedSuccess(sql, source.id, source.name, note);
       summary[source.id] = { ok: true, ...counts, stale: gathered.stale.length, ...gathered.rejected, byMode: gathered.byMode, unmapped: gathered.unmapped, warning: gathered.warning };
@@ -227,5 +234,6 @@ export async function fetchLoadoutFeeds(deps: { fetch?: PageFetch; sleep?: (ms: 
       summary[source.id] = { ok: false, error: message };
     }
   }
+  summary.droppedYunmaku = await dropBareYunmaku(sql);
   return summary;
 }
