@@ -272,12 +272,16 @@ async function missedFacts(start: Date, end: Date): Promise<Array<{ key: string;
     .map(([key, members]) => ({ key, rows: members }));
 }
 
-/** Articles whose own time falls in the window. None means the day really had nothing to judge. */
+/**
+ * Articles in the window that are still waiting to be judged. The clock is `timeline_at`, the same one
+ * `judgedReports` uses. Counting `published_at` instead left a finished article in this window forever:
+ * its judgement lives on another day, so the daily retried with "nothing judged".
+ */
 async function windowArticles(start: Date, end: Date): Promise<number> {
   const [row] = await sql<{ n: number }[]>`
     SELECT count(*)::int AS n FROM articles a
-    WHERE COALESCE(a.published_at, a.discovered_at) >= ${start}
-      AND COALESCE(a.published_at, a.discovered_at) < ${end}
+    WHERE a.timeline_at >= ${start} AND a.timeline_at < ${end}
+      AND a.processing_state IN ('new', 'failed')
       AND NOT EXISTS (SELECT 1 FROM publications p WHERE p.article_id = a.id AND p.backfill)`;
   return row!.n;
 }
