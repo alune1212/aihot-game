@@ -1,6 +1,5 @@
 // Architecture boundaries and web rules that otherwise hold only by convention, and nothing kept that
-// nothing uses. Each rule reads the source and names what breaks it. A rule changes here and in the
-// document that states it together.
+// nothing uses. Each rule reads the source and names what breaks it; its message is its documentation.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
@@ -176,10 +175,10 @@ const CONVERTS_BEIJING_TIME: Record<string, string> = {
   "packages/contracts/src/time.ts": "the conversions themselves",
   "packages/backend/src/editorial/analyze.ts": "the score input keeps the form its prompt was tuned on (whole seconds without .000)",
   "packages/backend/src/editorial/writing.ts": "a beijingDate written out, left to the next change of editorial/",
-  "modules/codex-reset/web/admin-monitor.tsx": "sends a Beijing date and time typed in the admin with its zone, to the minute",
   "site/changelog/FeatureRelease.tsx": "a changelog entry's Beijing date and time with its zone, to the minute, in dateTime",
   "clients/decisions/decisions.mjs": "installed as one file away from the repository, so it cannot import time.ts",
   "clients/watchdog/watchdog.mjs": "installed as one file away from the repository, so it cannot import time.ts",
+  "clients/mp-watch/articles.ts": "installed away from the repository with only its module's contracts, so it cannot import time.ts",
 };
 
 test("Beijing time is converted only in contracts/time.ts", () => {
