@@ -18,7 +18,7 @@ import { submitIndexNow } from "@aihot/backend/operations/indexnow";
 import { checkAlerts, sendDigest } from "@aihot/backend/operations/alerts";
 import { recoverStaleWork } from "@aihot/backend/operations/recover";
 import { forwardPendingFeedback } from "@aihot/backend/operations/feedback";
-import { backupConfigured, runBackup } from "@aihot/backend/operations/backup";
+import { backupConfigured, localBackupConfigured, runBackup, runLocalBackup } from "@aihot/backend/operations/backup";
 import { sourceHealthWeekly } from "@aihot/backend/operations/reports";
 
 const collecting = process.env.COLLECT_ENABLED === "true";
@@ -47,6 +47,7 @@ const ENGINE_SCHEDULES: Scheduled[] = [
   // Feedback that did not reach the internal Feishu chat when it was sent (off with FEISHU_INTERNAL_ENABLED).
   { name: "feedback.forward", cron: "*/10 * * * *", run: () => forwardPendingFeedback() },
   ...(backupConfigured() ? [{ name: "ops.backup", cron: "10 4 * * *", missed: "once" as const, run: () => runBackup() }] : []),
+  ...(localBackupConfigured() ? [{ name: "ops.backup.local", cron: "10 4 * * *", missed: "once" as const, run: () => runLocalBackup() }] : []),
   { name: "reports.source-health", cron: "0 9 * * 1", missed: "once", run: () => sourceHealthWeekly() },
   ...(collecting
     ? [

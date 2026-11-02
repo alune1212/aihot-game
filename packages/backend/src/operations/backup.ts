@@ -75,16 +75,8 @@ async function upload(s: Store, key: string, file: string, sha: string, size: nu
   if (!res.ok) throw new Error(`backup upload ${key}: HTTP ${res.status} ${(await res.text()).slice(0, 300)}`);
 }
 
-export async function runBackup(now = new Date()) {
-  const s = store();
-  const dir = path.join(config.dataDir, "backups");
-  await mkdir(dir, { recursive: true });
-  const stamp = now.toISOString().slice(0, 16).replace(/[-:T]/g, "");
-  // Named after the database ("news_db" → news-db-…), so two databases backed up into one store stay apart.
-  const name = sql.options.database.toLowerCase().replace(/[^a-z0-9]+/g, "-");
-  const dump = path.join(dir, `${name}-${stamp}.dump`);
-  // execFile includes argv in failures. Give libpq credentials through its environment so neither
-  // process listings nor a failed job's stored error contain them; keep other connection options.
+/** pg_dump arguments with the password only in the child environment, never on the command line. */
+function dumpTarget(): { env: NodeJS.ProcessEnv; href: string } {
   const connection = new URL(config.databaseUrl);
   const env = { ...process.env,
     ...(connection.username ? { PGUSER: decodeURIComponent(connection.username) } : {}),
@@ -99,7 +91,80 @@ export async function runBackup(now = new Date()) {
     env[key === "user" ? "PGUSER" : "PGPASSWORD"] = decodeURIComponent(option.slice(separator + 1));
     return false;
   }).join("&");
-  await run("pg_dump", ["--format=custom", "--compress=6", "--no-owner", "--file", dump, connection.href], { env, maxBuffer: 16 * 1024 * 1024 });
+  return { env, href: connection.href };
+}
+
+async function dumpDatabase(file: string): Promise<void> {
+  const { env, href } = dumpTarget();
+  await run("pg_dump", ["--format=custom", "--compress=6", "--no-owner", "--file", file, href], { env, maxBuffer: 16 * 1024 * 1024 });
+}
+
+export function localBackupConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.DB_BACKUP_LOCAL === "true";
+}
+
+export function localBackupDir(env: NodeJS.ProcessEnv = process.env): string {
+  const dir = env.DB_BACKUP_LOCAL_DIR?.trim();
+  return dir || "/var/backups/aihot";
+}
+
+export function localBackupKeepDays(env: NodeJS.ProcessEnv = process.env): number {
+  const parsed = Number(env.DB_BACKUP_LOCAL_KEEP_DAYS);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 365) return 14;
+  return parsed;
+}
+
+/** Delete dump files in `dir` whose mtime is older than `keepDays`. Other files stay. */
+export async function rotateLocalBackups(dir: string, keepDays: number, now = new Date()): Promise<string[]> {
+  const cutoff = now.getTime() - keepDays * 86400000;
+  let names: string[] = [];
+  try {
+    names = await readdir(dir);
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
+  const removed: string[] = [];
+  for (const name of names) {
+    if (!/^[\w.-]+\.dump$/.test(name)) continue;
+    const full = path.join(dir, name);
+    const info = await stat(full);
+    if (!info.isFile() || info.mtimeMs >= cutoff) continue;
+    await rm(full, { force: true });
+    removed.push(name);
+  }
+  return removed.sort();
+}
+
+/**
+ * One custom-format dump per Beijing day in DB_BACKUP_LOCAL_DIR, kept about DB_BACKUP_LOCAL_KEEP_DAYS.
+ * Off unless DB_BACKUP_LOCAL=true. Does not upload anywhere.
+ */
+export async function runLocalBackup(now = new Date(), env: NodeJS.ProcessEnv = process.env) {
+  if (!localBackupConfigured(env)) return null;
+  const dir = localBackupDir(env);
+  await mkdir(dir, { recursive: true });
+  const name = sql.options.database.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  const dump = path.join(dir, `${name}-${beijingDate(now)}.dump`);
+  await dumpDatabase(dump);
+  await run("pg_restore", ["--list", dump], { maxBuffer: 64 * 1024 * 1024 });
+  const removed = await rotateLocalBackups(dir, localBackupKeepDays(env), now);
+  const summary = { at: now.toISOString(), file: dump, removed };
+  console.log(JSON.stringify({ level: "info", msg: "local backup", ...summary }));
+  return summary;
+}
+
+export async function runBackup(now = new Date()) {
+  const s = store();
+  const dir = path.join(config.dataDir, "backups");
+  await mkdir(dir, { recursive: true });
+  const stamp = now.toISOString().slice(0, 16).replace(/[-:T]/g, "");
+  // Named after the database ("news_db" → news-db-…), so two databases backed up into one store stay apart.
+  const name = sql.options.database.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  const dump = path.join(dir, `${name}-${stamp}.dump`);
+  // execFile includes argv in failures. Give libpq credentials through its environment so neither
+  // process listings nor a failed job's stored error contain them; keep other connection options.
+  await dumpDatabase(dump);
   // Verify before shipping: the archive must list cleanly.
   await run("pg_restore", ["--list", dump], { maxBuffer: 64 * 1024 * 1024 });
   const files = path.join(dir, `${name}-files-${stamp}.tar.gz`);
