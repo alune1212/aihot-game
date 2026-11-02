@@ -153,9 +153,49 @@ export async function shapeLoadoutCategories<C extends ListedCode, W extends Que
   categories: readonly Cat[],
   query: LoadoutListQuery,
   price: (categories: Cat[]) => Promise<Cat[]>,
+  cap = true,
 ): Promise<Cat[]> {
   const deferCap = query.sort === "price" || query.minPrice != null || query.maxPrice != null;
-  const prepared = applyLoadoutQuery(categories, deferCap ? { ...query, minPrice: null, maxPrice: null, sort: "popularity" } : query, !deferCap);
+  const prepared = applyLoadoutQuery(categories, deferCap ? { ...query, minPrice: null, maxPrice: null, sort: "popularity" } : query, cap && !deferCap);
   const priced = await price(prepared);
-  return deferCap ? applyLoadoutQuery(priced, query, true) : priced;
+  return deferCap ? applyLoadoutQuery(priced, query, cap) : priced;
+}
+
+/** 一把枪的页面用：筛选和排序作用在这把枪的全部方案上，不按每枪 40 条截断。 */
+export function gunPageCodes<C extends ListedCode>(codes: readonly C[], query: LoadoutListQuery): C[] {
+  const [category] = applyLoadoutQuery(
+    [{ key: "", weapons: [{ name: "", tier: null, codes: [...codes] }] }],
+    { ...query, category: null, tier: null },
+    false,
+  );
+  const matched = category?.weapons[0]?.codes ?? [];
+  return [...matched].sort((a, b) => compareCodes(a, b, query.sort));
+}
+
+export function gunSummary(codes: readonly ListedCode[]): {
+  total: number;
+  priceMin: number | null;
+  priceMax: number | null;
+  modes: Array<{ mode: (typeof LOADOUT_MODES)[number]; count: number }>;
+} {
+  const totals = codes.map((code) => code.total).filter((value): value is number => value != null && value > 0);
+  return {
+    total: codes.length,
+    priceMin: totals.length ? Math.min(...totals) : null,
+    priceMax: totals.length ? Math.max(...totals) : null,
+    modes: LOADOUT_MODES.map((mode) => ({ mode, count: codes.filter((code) => code.mode === mode).length })),
+  };
+}
+
+/** 枪械页地址。带上列表里仍然适用的筛选，不带枪种、梯队和旧的 gun 参数。 */
+export function gunHref(name: string, params?: { get(name: string): string | null }): string {
+  const next = new URLSearchParams();
+  if (params) {
+    for (const key of ["mode", "source", "sort", "q", "pending", "min", "max"]) {
+      const value = params.get(key);
+      if (value) next.set(key, value);
+    }
+  }
+  const search = next.toString();
+  return `/loadouts/gun/${encodeURIComponent(name)}${search ? `?${search}` : ""}`;
 }

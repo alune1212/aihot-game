@@ -3,7 +3,7 @@ import { after, test } from "node:test";
 import { closeDb, sql } from "@aihot/backend/db";
 import { isWeaponListed, WEAPON_CATEGORIES } from "../catalog.ts";
 import { extractLoadouts } from "../extract.ts";
-import { LOADOUT_PER_WEAPON, shapeLoadoutCategories, type LoadoutListQuery } from "../query.ts";
+import { gunHref, gunPageCodes, gunSummary, LOADOUT_PER_WEAPON, shapeLoadoutCategories, type LoadoutListQuery } from "../query.ts";
 import { listLoadouts, syncArticleLoadouts } from "../store.ts";
 
 after(closeDb);
@@ -98,4 +98,14 @@ test("filters and sorts run before the per-weapon cap", async () => {
   assert.equal((await listed({ category: "smg" })).length, 0);
   assert.equal((await listed({ tier: "S" })).length, 0);
   assert.equal((await listed({ tier: "A", q: "稀有作者" }))[0]?.id, hidden.id);
+  const uncapped = await shapeLoadoutCategories(categories, base, async (rows) => rows, false);
+  assert.equal(uncapped[0]!.weapons[0]!.codes.length, LOADOUT_PER_WEAPON + 1);
+  const page = gunPageCodes(codes, base);
+  assert.equal(page.length, LOADOUT_PER_WEAPON + 1);
+  assert.equal(gunPageCodes(codes, { ...base, mode: "全面战场" })[0]?.id, hidden.id);
+  assert.equal(gunPageCodes(codes, { ...base, sort: "price" })[0]?.id, hidden.id);
+  assert.equal(gunSummary(codes).total, LOADOUT_PER_WEAPON + 1);
+  assert.equal(gunSummary(codes).modes.find((item) => item.mode === "全面战场")?.count, 1);
+  assert.equal(gunSummary(codes).priceMin, 1000);
+  assert.equal(gunHref("RM277突击步枪", new URLSearchParams("mode=烽火地带&gun=旧")), "/loadouts/gun/RM277%E7%AA%81%E5%87%BB%E6%AD%A5%E6%9E%AA?mode=%E7%83%BD%E7%81%AB%E5%9C%B0%E5%B8%A6");
 });

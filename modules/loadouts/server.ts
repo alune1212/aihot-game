@@ -1,14 +1,14 @@
 import type { FastifyInstance } from "fastify";
 import { sql } from "@aihot/backend/db";
 import { defineServerModule } from "@aihot/backend/modules";
-import { GAME_ID, GAME_NAME } from "./catalog.ts";
+import { GAME_ID, GAME_NAME, isWeaponListed, WEAPON_CATEGORIES } from "./catalog.ts";
 import { loadoutDetail, priceLoadoutList, syncLoadoutDetails, syncLoadoutPrices } from "./detail.ts";
 import { fetchAmsCodes, fetchDeltaCodes, fetchNssCodes, fetchWeaponTiers, fetchWeaponTtk } from "./ingest.ts";
 import { fetchLoadoutFeeds } from "./fetch.ts";
 import { cleanupOutOfSeason } from "./cleanup.ts";
 import { BALANCE_SEASON_NOTE, feedEnabled } from "./feeds.ts";
 import { currentSeason, detectSeason, seasonLabel, type StoredSeason } from "./season.ts";
-import { parseLoadoutQuery, shapeLoadoutCategories } from "./query.ts";
+import { gunPageCodes, gunSummary, parseLoadoutQuery, shapeLoadoutCategories } from "./query.ts";
 import { listLoadouts, syncArticleLoadouts } from "./store.ts";
 import { verifyLoadouts } from "./verify.ts";
 
@@ -36,6 +36,46 @@ export default defineServerModule({
         gameId: listed.gameId,
         categories,
         note: seasonNote(season),
+      };
+    });
+    app.get("/api/loadouts/gun/:weapon", async (req, reply) => {
+      const name = (req.params as { weapon: string }).weapon;
+      const known = WEAPON_CATEGORIES.flatMap((category) => category.weapons.filter((weapon) => weapon.name === name && isWeaponListed(weapon)).map((weapon) => ({ key: category.key, label: category.label, weapon }))).at(0);
+      if (!known) return reply.code(404).type("application/json").send({ error: "not_found" });
+      const url = new URL(req.url, "http://localhost");
+      const query = { ...parseLoadoutQuery(url.searchParams), category: null, tier: null };
+      const listed = await listLoadouts(sql, GAME_ID, null);
+      const narrowed = listed.categories
+        .map((category) => ({ ...category, weapons: category.weapons.filter((weapon) => weapon.name === name) }))
+        .filter((category) => category.weapons.length > 0);
+      const neutral = { ...query, mode: null, source: null, q: "", pending: false, minPrice: null, maxPrice: null, sort: "popularity" as const };
+      const priced = narrowed.length
+        ? await shapeLoadoutCategories(narrowed, neutral, (rows) => priceLoadoutList(sql, rows), false)
+        : [];
+      const weapon = priced.flatMap((category) => category.weapons).find((item) => item.name === name) ?? narrowed[0]?.weapons[0];
+      if (!weapon) return reply.code(404).type("application/json").send({ error: "not_found" });
+      const requested = Number(url.searchParams.get("code"));
+      const knownCode = Number.isSafeInteger(requested) && weapon.codes.some((code) => code.id === requested);
+      const selected = knownCode ? await loadoutDetail(sql, requested) : null;
+      reply.header("cache-control", "public, max-age=60");
+      return {
+        game: { id: GAME_ID, name: GAME_NAME },
+        weapon: {
+          name: weapon.name,
+          categoryKey: known.key,
+          categoryLabel: known.label,
+          pic: weapon.pic,
+          grade: weapon.grade,
+          objectId: weapon.objectId,
+          tier: weapon.tier,
+          tierAsOf: weapon.tierAsOf,
+          ttkText: weapon.ttkText,
+          ttkNote: weapon.ttkNote,
+          patchText: weapon.patchText,
+          summary: gunSummary(weapon.codes),
+          codes: gunPageCodes(weapon.codes, query),
+        },
+        selected: selected && selected.code.weapon === name ? selected : null,
       };
     });
     app.get("/api/loadouts/:id", async (req, reply) => {
@@ -163,13 +203,21 @@ export default defineServerModule({
     },
   },
   llms: () => ({
-    pages: [`- [改枪码](/loadouts): 按《${GAME_NAME}》的枪种和枪名浏览改枪码。点进一条可以看到配件、最新价格和改装前后的属性`],
+    pages: [`- [改枪码](/loadouts): 按《${GAME_NAME}》的枪种和枪名浏览改枪码。点开一把枪进入它自己的页面，可以看到全部方案、配件、最新价格和改装前后的属性`],
     api: [
-      "- GET /api/loadouts — 改枪码，按枪种和枪名分组，带官方枪图、品质、作者、来源和整枪总价（价格齐了才有）",
+      "- GET /api/loadouts — 改枪码，按枪种和枪名分组，带官方枪图、品质、作者、来源和整枪总价（价格齐了才有）。每把枪先筛选再最多留 40 条",
+      "- GET /api/loadouts/gun/:weapon — 一把枪的全部方案。筛选和排序作用在截断之前，不按 40 条截断。`code` 带上选中方案的配件、单价和属性",
       "- GET /api/loadouts/:id — 一条改枪码的配件、单价、总价和属性",
     ],
   }),
   sitemap: {
-    entries: async () => [{ loc: "/loadouts", changefreq: "hourly", priority: 0.7 }],
+    entries: async () => [
+      { loc: "/loadouts", changefreq: "hourly", priority: 0.7 },
+      ...WEAPON_CATEGORIES.flatMap((category) => category.weapons.filter((weapon) => isWeaponListed(weapon)).map((weapon) => ({
+        loc: `/loadouts/gun/${encodeURIComponent(weapon.name)}`,
+        changefreq: "hourly",
+        priority: 0.6,
+      }))),
+    ],
   },
 });
