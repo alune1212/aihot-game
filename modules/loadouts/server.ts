@@ -10,6 +10,8 @@ import { cleanupOutOfSeason } from "./cleanup.ts";
 import { BALANCE_SEASON_NOTE, feedEnabled } from "./feeds.ts";
 import { currentSeason, detectSeason, seasonLabel, type StoredSeason } from "./season.ts";
 import { gunPageCodes, gunSummary, parseLoadoutQuery, shapeLoadoutCategories } from "./query.ts";
+import { recommendFromParams } from "./recommend.ts";
+import { recomputeAttachmentStats, weaponAttachmentStats } from "./stats.ts";
 import { listLoadouts, syncArticleLoadouts } from "./store.ts";
 import { verifyLoadouts } from "./verify.ts";
 
@@ -38,6 +40,10 @@ export default defineServerModule({
         categories,
         note: seasonNote(season),
       };
+    });
+    app.get("/api/loadouts/recommend", async (req, reply) => {
+      reply.header("cache-control", "public, max-age=60");
+      return recommendFromParams(new URL(req.url, "http://localhost").searchParams);
     });
     app.get("/api/loadouts/gun/:weapon", async (req, reply) => {
       const name = (req.params as { weapon: string }).weapon;
@@ -80,6 +86,7 @@ export default defineServerModule({
             const coverage = partialCoverage(costs.get(code.id), code.total);
             return coverage == null ? code : { ...code, coverage };
           }),
+          attachments: await weaponAttachmentStats(sql, name),
         },
         selected: selected && selected.code.weapon === name ? selected : null,
       };
@@ -117,6 +124,14 @@ export default defineServerModule({
       missed: "skip",
       when: () => process.env.COLLECT_ENABLED === "true",
       run: () => syncLoadoutDetails(),
+    },
+    {
+      name: "loadouts.stats",
+      // 跟在官方详情后面，用库里已经对上的配件重算热度。页面只读这份结果。
+      cron: "55 */6 * * *",
+      missed: "skip",
+      when: () => process.env.COLLECT_ENABLED === "true",
+      run: () => recomputeAttachmentStats(),
     },
     {
       name: "loadouts.prices",
@@ -225,10 +240,14 @@ export default defineServerModule({
     },
   },
   llms: () => ({
-    pages: [`- [改枪码](/loadouts): 按《${GAME_NAME}》的枪种和枪名浏览改枪码。点开一把枪进入它自己的页面，可以看到全部方案、配件、最新价格和改装前后的属性`],
+    pages: [
+      `- [改枪码](/loadouts): 按《${GAME_NAME}》的枪种和枪名浏览改枪码。点开一把枪进入它自己的页面，可以看到全部方案、配件、最新价格和改装前后的属性`,
+      `- [改枪推荐](/loadouts/recommend): 按模式、玩法和预算，从已经收录的改枪码里挑。不会新编方案码`,
+    ],
     api: [
       "- GET /api/loadouts — 改枪码，按枪种和枪名分组，带官方枪图、品质、作者、来源和整枪总价（价格齐了才有）。每把枪先筛选再最多留 40 条",
-      "- GET /api/loadouts/gun/:weapon — 一把枪的全部方案。筛选和排序作用在截断之前，不按 40 条截断。`code` 带上选中方案的配件、单价和属性",
+      "- GET /api/loadouts/recommend — 按模式、枪、玩法、偏好属性和预算给现有改枪码打分。没有官方总价时预算不生效。说明默认是模板",
+      "- GET /api/loadouts/gun/:weapon — 一把枪的全部方案。筛选和排序作用在截断之前，不按 40 条截断。`code` 带上选中方案的配件、单价和属性；价格没齐时带覆盖率。`attachments` 是这把枪的配件热度和大众配置",
       "- GET /api/loadouts/:id — 一条改枪码的配件、单价、总价和属性",
       "- GET /api/loadouts/:id/cost — 这条码的枪身加已装配件的现价合计、覆盖率（0–100）和缺价的配件名。官方价优先于其他来源",
     ],
@@ -236,6 +255,7 @@ export default defineServerModule({
   sitemap: {
     entries: async () => [
       { loc: "/loadouts", changefreq: "hourly", priority: 0.7 },
+      { loc: "/loadouts/recommend", changefreq: "hourly", priority: 0.6 },
       ...WEAPON_CATEGORIES.flatMap((category) => category.weapons.filter((weapon) => isWeaponListed(weapon)).map((weapon) => ({
         loc: `/loadouts/gun/${encodeURIComponent(weapon.name)}`,
         changefreq: "hourly",

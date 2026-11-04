@@ -240,6 +240,9 @@ export default function LoadoutsPage() {
               枪图和整枪价来自官方改枪台，没有官方价显示 —。
             </p>
             <p className="mt-1 text-[13px] leading-relaxed text-ink-4">{note}</p>
+            <p className="mt-3">
+              <a href="/loadouts/recommend" className="inline-flex items-center rounded-control border border-accent bg-accent-soft px-3 py-1.5 text-[13px] font-semibold text-accent-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">按玩法推荐</a>
+            </p>
           </header>
           <div className="mt-4 flex flex-wrap items-center gap-2" role="toolbar" aria-label="筛选">
             <Chip pressed={!category} onClick={() => patch({ category: null })}>全部</Chip>

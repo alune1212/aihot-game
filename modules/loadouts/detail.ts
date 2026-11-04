@@ -24,6 +24,7 @@ import { currentSeason } from "./season.ts";
 import { formatApplyCount, formatLikeCount } from "./codes.ts";
 import { presentBalance, type WeaponBalanceView } from "./balance.ts";
 import { formatGamePrice } from "./parse-yufan.ts";
+import { recomputeAttachmentStats } from "./stats.ts";
 import { recordFeedFailure, recordFeedSuccess, type LoadoutCategoryView } from "./store.ts";
 
 const GAP_MS = 1200;
@@ -185,7 +186,13 @@ export async function syncLoadoutDetails(deps: { fetch?: IdeFetch; sleep?: (ms: 
     return { ok: false, matched, pages, guns: guns.size, missing: pending.size, error: message };
   }
   await recordFeedSuccess(sql, FEED_DETAIL.id, FEED_DETAIL.name, summary);
-  return { ok: true, matched, pages, guns: guns.size, missing: pending.size };
+  try {
+    const attachmentStats = await recomputeAttachmentStats();
+    return { ok: true, matched, pages, guns: guns.size, missing: pending.size, attachmentStats };
+  } catch (error) {
+    const statsError = error instanceof Error ? error.message : String(error);
+    return { ok: true, matched, pages, guns: guns.size, missing: pending.size, statsError };
+  }
 }
 
 function collectObjectIds(payload: LoadoutPayload): number[] {

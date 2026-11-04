@@ -8,6 +8,7 @@ import { IconChevronLeft } from "@aihot/web/components/icons";
 import { PhoneBar } from "@aihot/web/components/shell/PhoneBar";
 import type { Screen } from "@aihot/web/components/shell/screens";
 import { LOADOUT_MODES, LOADOUT_SOURCES, type LoadoutSort } from "../query.ts";
+import { AttachmentHeat, type AttachmentReport } from "./heat.tsx";
 
 export const handle: Screen = { tab: "loadouts", name: "改枪" };
 
@@ -58,6 +59,7 @@ interface WeaponView {
   patchText: string | null;
   summary: Summary;
   codes: LoadoutCode[];
+  attachments: AttachmentReport | null;
 }
 interface Effect { value: string; color: "green" | "red" }
 interface Slot {
@@ -247,6 +249,7 @@ export default function GunLoadoutsPage() {
             <p className="mt-2 flex flex-wrap items-center gap-1.5">
               {weapon.tier ? <span className={`rounded-mark px-1.5 py-0.5 text-[12px] font-semibold ${tierClass(weapon.tier)}`} title={`聪聪强度梯队${weapon.tierAsOf ? `，${weapon.tierAsOf} 更新` : ""}。社区排名，不是官方`}>聪聪 {weapon.tier}</span> : null}
               {weapon.ttkText ? <span className="rounded-mark border border-line px-1.5 py-0.5 text-[12px] text-ink-2" title={weapon.ttkNote ?? undefined}>{weapon.ttkText}</span> : null}
+              <a href={`/loadouts/recommend?weapon=${encodeURIComponent(weapon.name)}`} className="rounded-mark border border-accent bg-accent-soft px-1.5 py-0.5 text-[12px] font-semibold text-accent-ink">按这把枪推荐</a>
             </p>
             <p className="mt-2 text-[13px] text-ink-3">
               {weapon.summary.modes.map((item, index) => (
@@ -257,6 +260,9 @@ export default function GunLoadoutsPage() {
           </div>
         </div>
       </header>
+      {weapon.attachments ? (
+        <AttachmentHeat report={weapon.attachments} pageMode={mode} tier={weapon.tier} tierAsOf={weapon.tierAsOf} ttkText={weapon.ttkText} ttkNote={weapon.ttkNote} />
+      ) : null}
       <div className="mt-4 flex flex-wrap items-center gap-2" role="toolbar" aria-label="模式">
         <Chip href={href({ mode: null })} pressed={!mode}>全部模式</Chip>
         {LOADOUT_MODES.map((item) => <Chip key={item} href={href({ mode: item })} pressed={mode === item}>{item}</Chip>)}
