@@ -36,6 +36,7 @@ interface LoadoutCode {
   verification: "ok" | "pending" | "removed" | null;
   totalText: string | null;
   total: number | null;
+  coverage?: number;
   name: string | null;
   partCount: number;
 }
@@ -319,6 +320,7 @@ export default function GunLoadoutsPage() {
                         {code.verification === "pending" ? <span className="rounded-mark border border-line px-1.5 py-0.5 text-ink-4">待验证</span> : null}
                         {code.verification === "removed" ? <span className="rounded-mark border border-line px-1.5 py-0.5 text-ink-4">源站已撤</span> : null}
                         {code.popularityText ? <span className="text-ink-3">{code.popularityText}</span> : null}
+                        {typeof code.coverage === "number" ? <span className="text-ink-4">价格覆盖 {code.coverage}%</span> : null}
                       </span>
                     </a>
                   </li>

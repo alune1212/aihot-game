@@ -8,5 +8,5 @@ export default defineModule({
     { path: "loadouts/gun/:weapon", file: "web/gun.tsx", id: "loadouts-gun" },
     { path: "loadouts/:id", file: "web/detail.tsx" },
   ],
-  apiPaths: [/^\/api\/loadouts$/, /^\/api\/loadouts\/recommend$/, /^\/api\/loadouts\/gun\/[^/]+$/, /^\/api\/loadouts\/\d+$/],
+  apiPaths: [/^\/api\/loadouts$/, /^\/api\/loadouts\/recommend$/, /^\/api\/loadouts\/gun\/[^/]+$/, /^\/api\/loadouts\/\d+$/, /^\/api\/loadouts\/\d+\/cost$/],
 });

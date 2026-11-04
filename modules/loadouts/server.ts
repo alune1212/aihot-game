@@ -3,6 +3,7 @@ import { sql } from "@aihot/backend/db";
 import { defineServerModule } from "@aihot/backend/modules";
 import { GAME_ID, GAME_NAME, isWeaponListed, WEAPON_CATEGORIES } from "./catalog.ts";
 import { loadoutDetail, priceLoadoutList, syncLoadoutDetails, syncLoadoutPrices } from "./detail.ts";
+import { costsForLoadouts, loadoutCost, partialCoverage, syncMarketPrices } from "./prices.ts";
 import { fetchAmsCodes, fetchDeltaCodes, fetchNssCodes, fetchWeaponTiers, fetchWeaponTtk } from "./ingest.ts";
 import { fetchLoadoutFeeds } from "./fetch.ts";
 import { cleanupOutOfSeason } from "./cleanup.ts";
@@ -60,6 +61,8 @@ export default defineServerModule({
         : [];
       const weapon = priced.flatMap((category) => category.weapons).find((item) => item.name === name) ?? narrowed[0]?.weapons[0];
       if (!weapon) return reply.code(404).type("application/json").send({ error: "not_found" });
+      const listedCodes = gunPageCodes(weapon.codes, query);
+      const costs = await costsForLoadouts(sql, listedCodes.map((code) => code.id));
       const requested = Number(url.searchParams.get("code"));
       const knownCode = Number.isSafeInteger(requested) && weapon.codes.some((code) => code.id === requested);
       const selected = knownCode ? await loadoutDetail(sql, requested) : null;
@@ -79,11 +82,22 @@ export default defineServerModule({
           ttkNote: weapon.ttkNote,
           patchText: weapon.patchText,
           summary: gunSummary(weapon.codes),
-          codes: gunPageCodes(weapon.codes, query),
+          codes: listedCodes.map((code) => {
+            const coverage = partialCoverage(costs.get(code.id), code.total);
+            return coverage == null ? code : { ...code, coverage };
+          }),
           attachments: await weaponAttachmentStats(sql, name),
         },
         selected: selected && selected.code.weapon === name ? selected : null,
       };
+    });
+    app.get("/api/loadouts/:id/cost", async (req, reply) => {
+      const id = Number((req.params as { id: string }).id);
+      if (!Number.isSafeInteger(id) || id <= 0) return reply.code(404).type("application/json").send({ error: "not_found" });
+      const cost = await loadoutCost(sql, id);
+      if (!cost) return reply.code(404).type("application/json").send({ error: "not_found" });
+      reply.header("cache-control", "public, max-age=60");
+      return cost;
     });
     app.get("/api/loadouts/:id", async (req, reply) => {
       const id = Number((req.params as { id: string }).id);
@@ -126,6 +140,14 @@ export default defineServerModule({
       missed: "skip",
       when: () => process.env.COLLECT_ENABLED === "true",
       run: () => syncLoadoutPrices(),
+    },
+    {
+      name: "loadouts.prices.catalog",
+      // 枪和配件的全量目录。放在单件刷新之后，错过就等下一小时。
+      cron: "25 * * * *",
+      missed: "skip",
+      when: () => feedEnabled("LOADOUT_PRICE_AMS_ENABLED"),
+      run: () => syncMarketPrices(),
     },
     {
       name: "loadouts.fetch.ams",
@@ -191,7 +213,7 @@ export default defineServerModule({
     const rows = await sql<{ id: string; name: string; last_error: string | null; last_fetch_at: Date | null }[]>`
       SELECT id, name, last_error, last_fetch_at FROM loadout_feeds WHERE health = 'failing'`;
     return rows.map((row) => {
-      const ams = row.id === "ams" || row.id === "ams-price";
+      const ams = row.id === "ams" || row.id === "ams-price" || row.id === "ams-catalog";
       return {
         key: `loadouts.${row.id}`,
         level: "today" as const,
@@ -225,8 +247,9 @@ export default defineServerModule({
     api: [
       "- GET /api/loadouts — 改枪码，按枪种和枪名分组，带官方枪图、品质、作者、来源和整枪总价（价格齐了才有）。每把枪先筛选再最多留 40 条",
       "- GET /api/loadouts/recommend — 按模式、枪、玩法、偏好属性和预算给现有改枪码打分。没有官方总价时预算不生效。说明默认是模板",
-      "- GET /api/loadouts/gun/:weapon — 一把枪的全部方案。筛选和排序作用在截断之前，不按 40 条截断。`code` 带上选中方案的配件、单价和属性。`attachments` 是这把枪的配件热度和大众配置",
+      "- GET /api/loadouts/gun/:weapon — 一把枪的全部方案。筛选和排序作用在截断之前，不按 40 条截断。`code` 带上选中方案的配件、单价和属性；价格没齐时带覆盖率。`attachments` 是这把枪的配件热度和大众配置",
       "- GET /api/loadouts/:id — 一条改枪码的配件、单价、总价和属性",
+      "- GET /api/loadouts/:id/cost — 这条码的枪身加已装配件的现价合计、覆盖率（0–100）和缺价的配件名。官方价优先于其他来源",
     ],
   }),
   sitemap: {

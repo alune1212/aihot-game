@@ -6,7 +6,8 @@ import { migrationPlan } from "../../../scripts/migration-safety.ts";
 import {
   explainEnabled, explainRanked, isGroundedExplanation, polishExplanation, polishWithSiteModel, recommendLoadouts, recommendQueryFrom,
 } from "../recommend.ts";
-import { budgetCost } from "../budget-cost.ts";
+import { spendableCost } from "../budget-cost.ts";
+import { writePriceSnapshot } from "../prices.ts";
 import { explanationFacts, rankLoadouts, scoreWeights, templateExplanation, type ScoreInput, type Stats } from "../recommend-rules.ts";
 import { aggregateStats, popularityWeight, presentWeaponStats, recomputeAttachmentStats, weaponAttachmentStats, type StatCode } from "../stats.ts";
 
@@ -112,11 +113,11 @@ test("recommendation score stays on the real codes and prefers the asked playsty
 });
 
 test("a partial market price is not a budget", () => {
-  const partial = budgetCost([{ objectId: 1, name: "枪身" }, { objectId: 2, name: "消音" }], new Map([[1, 80_000]]));
+  const partial = spendableCost({ total: 80_000, coverage: 50, missing: ["消音"] });
   assert.equal(partial.coverage, 50);
   assert.equal(partial.spendable, null);
   assert.deepEqual(partial.missing, ["消音"]);
-  const full = budgetCost([{ objectId: 1, name: "枪身" }, { objectId: 2, name: "消音" }], new Map([[1, 80_000], [2, 20_000]]));
+  const full = spendableCost({ total: 100_000, coverage: 100, missing: [] });
   assert.equal(full.coverage, 100);
   assert.equal(full.spendable, 100_000);
   const ranked = rankLoadouts([
@@ -251,15 +252,14 @@ test("official details are aggregated and only those codes are recommended", asy
   assert.equal(open.results.some((item) => item.code === bareCode), false);
   for (const item of open.results) assert.equal(inserted.some((row) => row.code === item.code), true);
 
-  const priced = [
-    [1001, 80_000], [11, 20_000], [21, 5_000], [22, 1_000],
-    [1003, 400_000], [12, 50_000],
-  ] as const;
-  for (const [objectId, price] of priced) {
-    await sql`INSERT INTO loadout_item_prices (object_id, price, source, priced_at)
-      VALUES (${objectId}, ${price}, 'ams', now())
-      ON CONFLICT (object_id) DO UPDATE SET price = EXCLUDED.price`;
-  }
+  await writePriceSnapshot(sql, [
+    { objectId: 1001, name: "M870枪身甲", price: 80_000 },
+    { objectId: 11, name: "测试消音器", price: 20_000 },
+    { objectId: 21, name: "垂直握把", price: 5_000 },
+    { objectId: 22, name: "直角握把", price: 1_000 },
+    { objectId: 1003, name: "M870枪身乙", price: 400_000 },
+    { objectId: 12, name: "测试消焰器", price: 50_000 },
+  ], "ams", new Date("2026-11-04T03:00:00.000Z"));
   const budgeted = await recommendLoadouts(sql, { ...query, budget: 150_000 });
   assert.equal(budgeted.pricesAvailable, true);
   assert.equal(budgeted.budgetApplied, true);

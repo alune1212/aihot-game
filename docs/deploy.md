@@ -60,9 +60,16 @@ MCP 默认接受 `SITE_URL` 的主机以及 `localhost`、`127.0.0.1`、`[::1]`�
 
 **2026 年 11 月改枪码增加配件热度和推荐。** 已有改枪码都保留。新跑一个迁移，是一张新表，不改旧列：
 
-- `0115_loadout_attachment_stats.sql`：按枪、模式、槽位记下官方方案里配件的使用次数和加权份额。编号避开交易行价格那条改动占用的 `0113`、`0114`，也不和上游 `0121`–`0123` 相撞。这次不采集价格。
+- `0115_loadout_attachment_stats.sql`：按枪、模式、槽位记下官方方案里配件的使用次数和加权份额。编号接在交易行价格的 `0113`、`0114` 后面，不和上游 `0121`–`0123` 相撞。
 
-热度由 `loadouts.stats` 重算（要 `COLLECT_ENABLED=true`），官方详情同步成功后也会重算。推荐页在 `/loadouts/recommend`。选填 `LOADOUT_EXPLAIN_ENABLED=true` 才让模型改写推荐说明，并且还要 `MODEL_CALLS_ENABLED=true`；两个都不写就用模板，打开页面不调用模型。
+热度由 `loadouts.stats` 重算（要 `COLLECT_ENABLED=true`），官方详情同步成功后也会重算。推荐页在 `/loadouts/recommend`。预算用 `costsForLoadouts` 的总价，覆盖率不满 100 的不拿来筛。选填 `LOADOUT_EXPLAIN_ENABLED=true` 才让模型改写推荐说明，并且还要 `MODEL_CALLS_ENABLED=true`；两个都不写就用模板，打开页面不调用模型。
+
+**2026 年 11 月交易行价格目录。** 已有改枪码和文章都不改。默认不拉价格。要拉的话，在 `COLLECT_ENABLED=true` 之外把 `LOADOUT_PRICE_AMS_ENABLED` 写成 `true`。不写就和升级前一样。新跑两个迁移，编号用 `0113`、`0114`，不和上游 `0121`–`0123` 相撞：
+
+- `0113_loadout_price_history.sql`：新表，按物品、来源和抓取时间留下价格
+- `0114_loadout_price_history_name_idx.sql`：按配件名查找的并发索引
+
+任务是 `loadouts.prices.catalog`（上海时间每小时第 25 分）。只读官方公开目录，不登录。调查和开关见 `docs/market-prices.md`。
 
 **2026 年 11 月再次合并上游引擎。** 已有文章和改枪码都不改。新跑一个迁移，是一条可以在线执行的并发索引，不锁整张表：
 

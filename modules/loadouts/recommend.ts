@@ -8,7 +8,7 @@ import type { LoadoutProperties } from "./ams.ts";
 import { presentBalance } from "./balance.ts";
 import { GAME_ID, isWeaponListed, WEAPON_CATEGORIES } from "./catalog.ts";
 import { formatApplyCount } from "./codes.ts";
-import { loadBudgetCosts, type BudgetPart } from "./budget-cost.ts";
+import { loadBudgetCosts } from "./budget-cost.ts";
 import { presentSources } from "./feeds.ts";
 import { formatGamePrice } from "./parse-yufan.ts";
 import {
@@ -306,16 +306,7 @@ export async function recommendLoadouts(db: Db, query: RecommendQuery, polish?: 
     list.push({ source: source.source, sourceUrl: source.source_url });
     sourcesById.set(Number(source.loadout_id), list);
   }
-  const pricedParts = new Map<number, BudgetPart[]>();
-  for (const item of parsed) {
-    const parts: BudgetPart[] = [];
-    if (item.payload.gunObjectId) parts.push({ objectId: item.payload.gunObjectId, name: item.row.weapon });
-    for (const slot of item.payload.slots) {
-      if (slot.objectId) parts.push({ objectId: slot.objectId, name: slot.name });
-    }
-    pricedParts.set(Number(item.row.id), parts);
-  }
-  const costs = await loadBudgetCosts(db, pricedParts);
+  const costs = await loadBudgetCosts(db, ids);
   const weapons = [...new Set(parsed.map((item) => item.row.weapon))];
   const statRows = weapons.length
     ? await db<{ weapon: string; mode: string; slot_id: string; object_id: number; share: number }[]>`
