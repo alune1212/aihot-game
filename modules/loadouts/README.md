@@ -18,6 +18,7 @@
 | `loadouts.fetch.deltacode` | `LOADOUT_DELTACODE_ENABLED` | `25 */12 * * *` | 国服配装公开的 `/loadouts` 一页 |
 | `loadouts.fetch.ttk` | `LOADOUT_DFTTK_ENABLED` | `40 5 * * *` | DFTTK 默认烽火理论 TTK 和体验服观察，一天一次 |
 | `loadouts.fetch.tier` | `LOADOUT_TIER_ENABLED` | `50 5 * * *` | 聪聪梯队，一天一次 |
+| `loadouts.prices.catalog` | `LOADOUT_PRICE_AMS_ENABLED` | `25 * * * *` | 官方枪械和配件目录的交易行现价。要同时打开 `COLLECT_ENABLED` |
 
 每个站先读 `robots.txt`。云码库禁止 `/api/`，所以只抓公开 HTML，不调用它的接口。洲械库没有 robots 文件（任意路径都返回首页 HTML），按允许处理。有力气的 robots 允许全站；数据在 `*.supabase.co`，这个项目没有 robots.txt（404），按允许处理。两次请求之间停 1.2 秒。某个站回 403、429 或 503 时，这一轮不再翻它剩下的页。一个站失败不影响另一个；连续 5 次失败记为 `failing`，写在表 `loadout_feeds`（`health`、`last_error`、`note`），并进周一的信源健康报告和告警。任务本身的结果在后台运行记录 `loadouts.fetch`。刚抓完马上再抓一次，云码库会暂时 403/404，等下一轮即可。
 
@@ -90,6 +91,11 @@
 |---|---|---|---|---|
 | 方案列表（含槽位、属性 origin/change、物品图） | 352143 | YWRywA | `dfm/solution.arms.list` | `{"page":1,"limit":20,"solutionType":"gun"}` |
 | 交易行最新均价 | 352143 | YWRywA | `dfm/object.price.latest` | `{"objectID":[物品id]}` |
+| 枪械 / 配件目录（含名称和均价） | 352143 | YWRywA | `dfm/object.list` | `{"primary":"gun" 或 "acc","second":"","objectID":""}` |
+
+`loadouts.prices.catalog` 走上面的目录接口，不登录。枪和配件各请求一次，间隔 1.2 秒。均价大于 0 的写入 `loadout_price_history`（同一次抓取不重复插）并刷新 `loadout_item_prices`。最新价里已经是官方源时，别的来源盖不掉。目录是空的或结构变了，这一类不写，已有价格留着。调查见 `docs/market-prices.md`。
+
+`GET /api/loadouts/:id/cost` 用这张历史表算一条码的枪身加已装配件总价，并给出覆盖率（已有价的部件数 / 应有部件数，0–100）。物品 id 对上优先；对不上时按去掉空白后的配件名对。同一物品有多份报价时官方源优先。单枪页只在还没有整枪总价、并且覆盖率不到 100% 时，在方案行上多写「价格覆盖」。齐了的总价仍走原来的最新价。
 
 2025 年的资料写的是图表 `316969` / `NoOapI`，不登录返回 `ret 101`。现行图表 `352143` / `YWRywA` 匿名就能读到方案和均价，改装前后的 `origin` / `change` 也在这份匿名响应里，不需要登录。列表接口会忽略 `solutionCode` 筛选，只能按页把码对上。每页最多 20 条，间隔 1.2 秒，失败最多再试 2 次。`comm.ams.game.qq.com` 写在 `site/site.ts` 的 `directFetchHosts` 里。
 

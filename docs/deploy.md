@@ -58,6 +58,13 @@ MCP 默认接受 `SITE_URL` 的主机以及 `localhost`、`127.0.0.1`、`[::1]`�
 
 ### 更新
 
+**2026 年 11 月交易行价格目录。** 已有改枪码和文章都不改。默认不拉价格。要拉的话，在 `COLLECT_ENABLED=true` 之外把 `LOADOUT_PRICE_AMS_ENABLED` 写成 `true`。不写就和升级前一样。新跑两个迁移，编号用 `0113`、`0114`，不和上游 `0121`–`0123` 相撞：
+
+- `0113_loadout_price_history.sql`：新表，按物品、来源和抓取时间留下价格
+- `0114_loadout_price_history_name_idx.sql`：按配件名查找的并发索引
+
+任务是 `loadouts.prices.catalog`（上海时间每小时第 25 分）。只读官方公开目录，不登录。调查和开关见 `docs/market-prices.md`。
+
 **2026 年 11 月再次合并上游引擎。** 已有文章和改枪码都不改。新跑一个迁移，是一条可以在线执行的并发索引，不锁整张表：
 
 - `0123_articles_wechat_external_id_idx.sql`：在 `articles (raw->>'externalId')` 上建索引，只覆盖以 `https://mp.weixin.qq.com/s?__biz=` 开头的值。微信短链对上已核对的公众号文章时用它。编号不和改枪码迁移（最高 `0112_loadout_code_sources_absent.sql`）以及已有的 `0121`、`0122` 相撞；账本仍按完整文件名记账。
