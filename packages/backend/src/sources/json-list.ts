@@ -202,11 +202,14 @@ export async function fetchJsonList(source: SourceRow): Promise<Candidate[]> {
     if (!title || !url) continue;
     const externalId = c.externalIdPath ? getPath(item, c.externalIdPath) : null;
     const summary = firstString(item, c.summaryPaths);
-    const summaryIsBody = c.summaryIsBody === true && !!summary;
+    // A text alternate (.patch and the like) replaces a declared summary, same as RSS. The JSON
+    // detail document is a different body: it still wins when summaryIsBody is off.
+    const summaryIsBody = !c.detail?.bodyUrlSuffix && c.summaryIsBody === true && !!summary;
     const body = summaryIsBody ? null : await jsonDetailBody(c, item, url, headers);
     // A configured detail document is the body. No words there (or a failed read) is unconfirmed,
     // so a script-rendered article page is not fetched, with or without a reader key.
-    const detailConfigured = !summaryIsBody && !!(c.bodyUrlTemplate && c.bodyPath);
+    // bodyUrlSuffix still needs that fetch, so it stays pending instead of unconfirmed.
+    const detailConfigured = !summaryIsBody && !c.detail?.bodyUrlSuffix && !!(c.bodyUrlTemplate && c.bodyPath);
     out.push({
       url,
       title: collapseWhitespace(stripTags(title)),
