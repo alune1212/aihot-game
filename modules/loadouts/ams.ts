@@ -325,7 +325,7 @@ function payloadFromSolution(item: Record<string, unknown>, relate: Record<strin
     if (objectId && meta.price) prices.push({ objectId, price: meta.price });
     slots.push({
       slotId,
-      slotName: slotName(slotId),
+      slotName: slotName(slotId, objectId ? meta.name : null),
       objectId,
       name: objectId ? meta.name : null,
       pic: objectId ? meta.pic : null,

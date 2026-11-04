@@ -9,7 +9,8 @@ import {
 import { spendableCost } from "../budget-cost.ts";
 import { writePriceSnapshot } from "../prices.ts";
 import { explanationFacts, rankLoadouts, scoreWeights, templateExplanation, type ScoreInput, type Stats } from "../recommend-rules.ts";
-import { aggregateStats, popularityWeight, presentWeaponStats, recomputeAttachmentStats, weaponAttachmentStats, type StatCode } from "../stats.ts";
+import { slotName } from "../slots.ts";
+import { aggregateStats, popularityWeight, presentWeaponStats, recomputeAttachmentStats, weaponAttachmentStats, type StatCode, type StoredStat } from "../stats.ts";
 
 after(closeDb);
 
@@ -158,6 +159,20 @@ test("template text stays inside the facts, and a model that invents a gun or a 
   assert.equal(await polishExplanation(facts, async () => `${facts.weapon} 伤害 999，很适合腰射。`), null);
   assert.equal(await polishExplanation(facts, async () => `${facts.weapon} 方案码 ABCDEFGHIJKL 能用。`), null);
   assert.equal(await polishExplanation(facts, async () => { throw new Error("down"); }), null);
+  const bowFacts = {
+    weapon: "复合弓",
+    mode: "烽火地带",
+    styleLabel: "腰射",
+    tier: null,
+    ttkText: null,
+    costText: null,
+    parts: [{ slot: "弓弦", name: "复合弓增强弓弦", sharePercent: 55 }],
+    strongest: null,
+    weakest: null,
+  };
+  assert.equal(isGroundedExplanation("复合弓的弓弦用了「复合弓增强弓弦」，约 55% 的方案也是这件。", bowFacts), true);
+  assert.equal(isGroundedExplanation("复合弓把槽位55写成弓弦，份额约 55%。", bowFacts), false);
+  assert.equal(isGroundedExplanation("复合弓把槽位 56 写成握把片，份额约 55%。", bowFacts), false);
   assert.equal(explainEnabled(), false);
   assert.equal(await polishWithSiteModel(facts), null);
   const parsed = recommendQueryFrom(new URLSearchParams("style=hip&stats=hipShot,nope&budget=12.5&weapon=没有这把"));
@@ -165,6 +180,51 @@ test("template text stays inside the facts, and a model that invents a gun or a 
   assert.deepEqual(parsed.stats, ["hipShot"]);
   assert.equal(parsed.budget, 125_000);
   assert.equal(parsed.unknownWeapon, true);
+});
+
+test("special weapon slots use the official Chinese names", () => {
+  // 2026-11-04 dfm/config.list 的 gunSlotMap。方案列表里实际出现过、原先没有中文名的号都在这里。
+  const official = {
+    "9": "照门",
+    "12": "前瞄准镜",
+    "21": "镜座",
+    "30": "后握贴片",
+    "36": "枪管脚架",
+    "43": "握把座",
+    "46": "上护木",
+    "51": "隔热网",
+    "52": "枪机",
+    "54": "拉机柄帽",
+    "55": "弓弦",
+    "56": "握把片",
+    "57": "弓臂",
+    "58": "弓瞄具",
+    "59": "箭台",
+    "60": "稳定杆",
+    "62": "杠杆",
+  };
+  for (const [id, name] of Object.entries(official)) assert.equal(slotName(id), name);
+  assert.equal(slotName("6"), "枪口");
+  assert.equal(slotName("99"), "其他配件");
+  assert.equal(slotName("99", "复合弓增强弓弦"), "弓弦");
+  assert.equal(slotName("99", "神秘零件"), "其他配件");
+  for (const label of [slotName("55"), slotName("56"), slotName("59"), slotName("99"), slotName("99", "神秘零件")]) {
+    assert.equal(/槽位\s*\d+/.test(label), false);
+  }
+  const stat = (slotId: string, name: string): StoredStat => ({
+    weapon: "复合弓", mode: "", slotId, objectId: Number(slotId), name, pic: null, grade: 4,
+    uses: 3, weight: 2, share: 1, filled: 3, samples: 3, computedAt: new Date("2026-11-04T00:00:00Z"),
+  });
+  const view = presentWeaponStats([stat("55", "复合弓增强弓弦"), stat("59", "复合弓竞赛箭台"), stat("56", "复合弓增强握把片")]);
+  const names = new Map(view?.groups[0]?.slots.map((slot) => [slot.slotId, slot.slotName]));
+  assert.equal(names.get("55"), "弓弦");
+  assert.equal(names.get("59"), "箭台");
+  assert.equal(names.get("56"), "握把片");
+  assert.equal(/槽位\s*\d+/.test(JSON.stringify(view)), false);
+  const unknown = presentWeaponStats([stat("99", "复合弓增强弓弦")]);
+  assert.equal(unknown?.groups[0]?.slots[0]?.slotName, "弓弦");
+  const plain = presentWeaponStats([stat("98", "神秘零件")]);
+  assert.equal(plain?.groups[0]?.slots[0]?.slotName, "其他配件");
 });
 
 test("attachment stats migration is a single online statement and does not reuse a filename", () => {
@@ -269,4 +329,48 @@ test("official details are aggregated and only those codes are recommended", asy
   for (const file of ["../web/heat.tsx", "../web/recommend.tsx", "../recommend-rules.ts"]) {
     assert.equal(readFileSync(new URL(file, import.meta.url), "utf8").includes(BANNED), false);
   }
+});
+
+test("a stored numeric slot label is shown and explained with the Chinese name", async () => {
+  const weapon = "复合弓";
+  const code = `${weapon}-烽火地带-6BOWCODE00000001`;
+  await sql`DELETE FROM loadout_codes WHERE weapon = ${weapon}`;
+  const origin = { meatHarm: 90, armorHarm: 65, shootDistance: 40, recoil: 32, control: 40, stable: 40, hipShot: 70, fireSpeed: 182 };
+  const payload = {
+    source: "ams",
+    name: "腰射复合弓",
+    previewPic: null,
+    gun: { objectId: 18080000001, name: weapon, pic: null, grade: 4 },
+    properties: { origin, change: null, fireMode: null, muzzleVelocity: null, capacity: null },
+    slots: [
+      { slotId: "55", slotName: "槽位 55", objectId: 5501, name: "复合弓增强弓弦", pic: null, grade: 4, effects: [] },
+      { slotId: "59", slotName: "槽位 59", objectId: 5901, name: "复合弓竞赛箭台", pic: null, grade: 4, effects: [] },
+      { slotId: "56", slotName: "槽位 56", objectId: 5601, name: "复合弓增强握把片", pic: null, grade: 4, effects: [] },
+    ],
+  };
+  const [row] = await sql<{ id: number }[]>`
+    INSERT INTO loadout_codes (game_id, category_key, weapon, code, mode, author, source, popularity, noted_at)
+    VALUES ('delta-force', 'special', ${weapon}, ${code}, '烽火地带', '测试', 'ams', 20, now())
+    RETURNING id`;
+  await sql`INSERT INTO loadout_details (loadout_id, source, gun_object_id, payload)
+    VALUES (${row!.id}, 'ams', 18080000001, ${sql.json(payload)})`;
+  await recomputeAttachmentStats();
+  const heat = await weaponAttachmentStats(sql, weapon);
+  const heatNames = new Map(heat?.groups[0]?.slots.map((slot) => [slot.slotId, slot.slotName]));
+  assert.equal(heatNames.get("55"), "弓弦");
+  assert.equal(heatNames.get("59"), "箭台");
+  assert.equal(heatNames.get("56"), "握把片");
+  const open = await recommendLoadouts(sql, {
+    mode: "烽火地带", style: "hip", stats: [], weapon, category: null, budget: null, unknownWeapon: false,
+  });
+  const hit = open.results.find((item) => item.code === code);
+  assert.ok(hit);
+  assert.deepEqual(hit.parts.map((part) => part.slotName), ["弓弦", "箭台", "握把片"]);
+  assert.equal(/槽位\s*\d+/.test(JSON.stringify(hit)), false);
+  assert.equal(hit.explanation.includes("弓弦"), true);
+  const polished = await recommendLoadouts(sql, {
+    mode: "烽火地带", style: "hip", stats: [], weapon, category: null, budget: null, unknownWeapon: false,
+  }, (facts) => polishExplanation(facts, async () => `复合弓的槽位55用了「${facts.parts[0]?.name ?? ""}」，约 ${facts.parts[0]?.sharePercent ?? 0}% 的方案也是这件。`));
+  assert.equal(polished.results[0]?.explanationSource, "template");
+  assert.equal(/槽位\s*\d+/.test(polished.results[0]?.explanation ?? ""), false);
 });

@@ -195,7 +195,7 @@ export function presentWeaponStats(rows: readonly StoredStat[]): AttachmentRepor
       const sorted = [...items].sort((a, b) => b.share - a.share || b.uses - a.uses || a.objectId - b.objectId);
       slots.push({
         slotId,
-        slotName: slotName(slotId),
+        slotName: slotName(slotId, sorted[0]?.name),
         filled,
         items: sorted.map((row) => ({
           objectId: row.objectId,

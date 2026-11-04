@@ -77,6 +77,7 @@ export function isGroundedExplanation(text: string, facts: ExplanationFacts): bo
   const trimmed = text.trim();
   if (trimmed.length < 8 || trimmed.length > 400) return false;
   if (trimmed.includes(BANNED)) return false;
+  if (/槽位\s*\d+/.test(trimmed)) return false;
   if (/[A-Za-z0-9]{12,}/.test(trimmed)) return false;
   if (/-(烽火地带|全面战场|黑潮爆破)-/.test(trimmed)) return false;
   for (const name of weaponNames) {
@@ -180,7 +181,7 @@ function parsedPayload(payload: unknown): { gunObjectId: number | null; properti
     if (!slotId) continue;
     const objectId = typeof slot.objectId === "number" && slot.objectId > 0 ? slot.objectId : null;
     const name = typeof slot.name === "string" && slot.name.trim() ? slot.name.trim() : null;
-    slots.push({ slotId, slotName: typeof slot.slotName === "string" && slot.slotName.trim() ? slot.slotName.trim() : slotName(slotId), objectId, name });
+    slots.push({ slotId, slotName: slotName(slotId, name), objectId, name });
   }
   return { gunObjectId, properties, slots };
 }

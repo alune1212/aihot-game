@@ -25,6 +25,7 @@ import { formatApplyCount, formatLikeCount } from "./codes.ts";
 import { presentBalance, type WeaponBalanceView } from "./balance.ts";
 import { formatGamePrice } from "./parse-yufan.ts";
 import { recomputeAttachmentStats } from "./stats.ts";
+import { slotName } from "./slots.ts";
 import { recordFeedFailure, recordFeedSuccess, type LoadoutCategoryView } from "./store.ts";
 
 const GAP_MS = 1200;
@@ -476,7 +477,7 @@ export async function loadoutDetail(db: Db, id: number): Promise<{
       previewPic: playerhubPic(payload.previewPic),
       gun: { ...payload.gun, pic: playerhubPic(payload.gun.pic), grade: asGrade(payload.gun.grade) },
       properties: payload.properties,
-      slots: payload.slots.map((slot) => ({ ...slot, pic: playerhubPic(slot.pic), price: slot.objectId ? prices.get(slot.objectId)?.price ?? null : null })),
+      slots: payload.slots.map((slot) => ({ ...slot, slotName: slotName(slot.slotId, slot.name), pic: playerhubPic(slot.pic), price: slot.objectId ? prices.get(slot.objectId)?.price ?? null : null })),
       prices: summarizePrices(payload.gun.objectId, payload.slots, prices),
     } : null,
   };
