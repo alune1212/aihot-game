@@ -58,6 +58,12 @@ MCP 默认接受 `SITE_URL` 的主机以及 `localhost`、`127.0.0.1`、`[::1]`�
 
 ### 更新
 
+**2026 年 11 月改枪码增加配件热度和推荐。** 已有改枪码都保留。新跑一个迁移，是一张新表，不改旧列：
+
+- `0115_loadout_attachment_stats.sql`：按枪、模式、槽位记下官方方案里配件的使用次数和加权份额。编号避开交易行价格那条改动占用的 `0113`、`0114`，也不和上游 `0121`–`0123` 相撞。这次不采集价格。
+
+热度由 `loadouts.stats` 重算（要 `COLLECT_ENABLED=true`），官方详情同步成功后也会重算。推荐页在 `/loadouts/recommend`。选填 `LOADOUT_EXPLAIN_ENABLED=true` 才让模型改写推荐说明，并且还要 `MODEL_CALLS_ENABLED=true`；两个都不写就用模板，打开页面不调用模型。
+
 **2026 年 11 月再次合并上游引擎。** 已有文章和改枪码都不改。新跑一个迁移，是一条可以在线执行的并发索引，不锁整张表：
 
 - `0123_articles_wechat_external_id_idx.sql`：在 `articles (raw->>'externalId')` 上建索引，只覆盖以 `https://mp.weixin.qq.com/s?__biz=` 开头的值。微信短链对上已核对的公众号文章时用它。编号不和改枪码迁移（最高 `0112_loadout_code_sources_absent.sql`）以及已有的 `0121`、`0122` 相撞；账本仍按完整文件名记账。
