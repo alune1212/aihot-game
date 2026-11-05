@@ -1,4 +1,4 @@
-// 官方方案列表、鸟兽兽、国服配装、DFTTK 和聪聪梯队。每个源单独跑，一个失败不影响另一个。
+// 官方方案列表、鸟兽兽、DFTTK 和聪聪梯队。每个源单独跑，一个失败不影响另一个。
 // 请求走 guardedFetch：设了 EGRESS_PROXY_URL 就走出网代理，.cn 和官方接口按框架规则直连。
 import { SITE } from "@aihot/site";
 import { guardedFetch } from "@aihot/backend/lib/http-fetch";
@@ -8,9 +8,6 @@ import { decideLoadout, mergeRaw, type FeedRow, type RawLoadout } from "./codes.
 import { postAms, type IdeFetch } from "./detail.ts";
 import {
   AMS_FEED_ID,
-  DELTACODE_FEED_ID,
-  DELTACODE_ORIGIN,
-  DELTACODE_PAGE,
   DFTTK_FEED_ID,
   DFTTK_MANIFEST,
   DFTTK_ORIGIN,
@@ -22,7 +19,6 @@ import {
   nssGunUrl,
 } from "./feeds.ts";
 import { absoluteDfttk, parseDfttkNames, parseDfttkPlan, parseDfttkPreview, parseDfttkRanking, parseRankingIndex } from "./parse-dfttk.ts";
-import { deltaCodeHasLoadouts, parseDeltaCode } from "./parse-deltacode.ts";
 import { nssLastPage, parseNss } from "./parse-nss.ts";
 import { parseTierList } from "./parse-tier.ts";
 import { mayFetch } from "./robots.ts";
@@ -54,7 +50,7 @@ export type PageFetch = (url: string, init?: PageInit) => Promise<PageResponse>;
 export interface Gathered {
   rows: FeedRow[];
   stale: FeedRow[];
-  rejected: { shape: number; international: number; unmapped: number };
+  rejected: { shape: number; international: number; unmapped: number; undated: number };
   unmapped: string[];
   byMode: Record<string, number>;
   warning: string | null;
@@ -94,7 +90,7 @@ function allow(status: number, body: string, url: string): boolean {
 function classify(raws: readonly RawLoadout[], seasonStart = SEASON_START): Gathered {
   const rows: FeedRow[] = [];
   const stale: FeedRow[] = [];
-  const rejected = { shape: 0, international: 0, unmapped: 0 };
+  const rejected = { shape: 0, international: 0, unmapped: 0, undated: 0 };
   const unmapped: string[] = [];
   const byMode: Record<string, number> = {};
   for (const raw of mergeRaw(raws)) {
@@ -120,7 +116,7 @@ function summarize(sourceName: string, gathered: Gathered, counts: { inserted: n
   return [
     `${sourceName}：新收录 ${counts.inserted}，更新 ${counts.updated}，已有来源 ${counts.kept}`,
     modes ? `按模式 ${modes}` : "",
-    `丢弃格式 ${gathered.rejected.shape}、国际服 ${gathered.rejected.international}、过季 ${gathered.stale.length}、对不上枪 ${gathered.rejected.unmapped}`,
+    `丢弃格式 ${gathered.rejected.shape}、国际服 ${gathered.rejected.international}、无日期 ${gathered.rejected.undated}、过季 ${gathered.stale.length}、对不上枪 ${gathered.rejected.unmapped}`,
     gathered.stale.length ? `其中 ${counts.staleNoted} 条过季日期写回了已有记录` : "",
     unmapped ? `对不上的枪：${unmapped}` : "",
     gathered.warning,
@@ -204,7 +200,7 @@ export async function gatherAms(fetchPage: PageFetch, sleep: (ms: number) => Pro
         weaponHint: item.weaponHint,
         author: item.author,
         priceText: null,
-        postedOn: null,
+        postedOn: item.postedOn,
         sourceUrl: "",
         popularity: item.applyNum,
         likes: item.likeNum,
@@ -255,21 +251,6 @@ export async function gatherNss(fetchPage: PageFetch, sleep: (ms: number) => Pro
 
 export function fetchNssCodes(deps: { fetch?: PageFetch; sleep?: (ms: number) => Promise<void>; now?: () => Date } = {}): Promise<Record<string, unknown>> {
   return runFeed(NSS_FEED_ID, "鸟兽兽", gatherNss, deps);
-}
-
-/** delta-code 公开的 /loadouts。robots 禁止 /api/，这里也不访问接口。403 记失败，不连累别的源。 */
-export async function gatherDeltaCode(fetchPage: PageFetch, sleep: (ms: number) => Promise<void>, seasonStart = SEASON_START): Promise<Gathered> {
-  const robots = await robotsOf(fetchPage, sleep, `${DELTACODE_ORIGIN}/robots.txt`);
-  if (!allow(robots.status, robots.body, DELTACODE_PAGE)) throw new Error("robots.txt 不允许抓取国服配装");
-  const html = await readPage(fetchPage, sleep, DELTACODE_PAGE);
-  const raws = parseDeltaCode(html);
-  if (!raws.length && deltaCodeHasLoadouts(html)) throw new Error("国服配装页面结构变了，没有抽出改枪码");
-  if (!raws.length) throw new Error("国服配装页面里没有改枪码");
-  return classify(raws, seasonStart);
-}
-
-export function fetchDeltaCodes(deps: { fetch?: PageFetch; sleep?: (ms: number) => Promise<void>; now?: () => Date } = {}): Promise<Record<string, unknown>> {
-  return runFeed(DELTACODE_FEED_ID, "国服配装", gatherDeltaCode, deps);
 }
 
 async function readJson(fetchPage: PageFetch, sleep: (ms: number) => Promise<void>, robots: { status: number; body: string }, url: string): Promise<string> {

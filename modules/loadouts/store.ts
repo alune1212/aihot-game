@@ -77,7 +77,7 @@ export async function syncArticleLoadouts(db: Db, articleId: string, reduced: bo
     FROM articles a
     LEFT JOIN publications p ON p.article_id = a.id
     WHERE a.id = ${articleId}`;
-  if (!row) return;
+  if (!row?.published_at) return;
   const text = [row.title_zh, row.summary, row.title, row.excerpt, row.body_text].filter(Boolean).join("\n\n");
   const found = extractLoadouts(text);
   for (const item of found) {
@@ -106,9 +106,13 @@ async function rememberSource(db: Db, loadoutId: number | string, source: string
     ON CONFLICT (loadout_id, source) DO UPDATE SET source_url = EXCLUDED.source_url, seen_at = now()`;
 }
 
-/** 写入一条聚合站的码。官方可以盖过社区来源；社区之间先到先得。每个来过的站都记在 loadout_code_sources。 */
+/**
+ * 写入一条聚合站的码。官方可以盖过社区来源；社区之间先到先得。每个来过的站都记在 loadout_code_sources。
+ * 来源没给发布日就不写。抓取时间不是发布日。
+ */
 export async function saveFeedLoadout(db: Db, source: string, row: FeedRow, fetchedAt: Date): Promise<"inserted" | "updated" | "kept"> {
   const noted = postedAt(row.postedOn);
+  if (!noted) return "kept";
   const popularity = row.popularity ?? null;
   const likes = row.likes ?? null;
   const inserted = await db<{ id: number }[]>`INSERT INTO loadout_codes
@@ -123,7 +127,10 @@ export async function saveFeedLoadout(db: Db, source: string, row: FeedRow, fetc
     SELECT id, source FROM loadout_codes WHERE game_id = ${GAME_ID} AND code = ${row.code}`;
   if (!existing) return "kept";
   await rememberSource(db, existing.id, source, row.sourceUrl);
-  if (!sourceOutranks(source, existing.source)) return "kept";
+  if (!sourceOutranks(source, existing.source)) {
+    await db`UPDATE loadout_codes SET noted_at = ${noted} WHERE id = ${existing.id} AND noted_at IS NULL`;
+    return "kept";
+  }
   await db`UPDATE loadout_codes SET
     category_key = ${row.categoryKey},
     weapon = ${row.weapon},
@@ -134,7 +141,7 @@ export async function saveFeedLoadout(db: Db, source: string, row: FeedRow, fetc
     likes = COALESCE(${likes}, likes),
     source = ${source},
     source_url = ${row.sourceUrl},
-    noted_at = COALESCE(${noted}, noted_at),
+    noted_at = ${noted},
     fetched_at = ${fetchedAt},
     article_id = NULL
     WHERE id = ${existing.id}`;

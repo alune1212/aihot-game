@@ -1,6 +1,5 @@
 // 有力气的官方热门不在 HTML 里，而在它前端用的 Supabase 公开表 official_gun_codes。
 // 只收 source=official 且未下架的行。枪名对不上名录、模式不完整的，交给 decideLoadout 丢掉。
-import { beijingDate } from "@aihot/contracts/time";
 import type { RawLoadout } from "./codes.ts";
 
 export interface YufanParse {
@@ -38,14 +37,6 @@ function popularity(value: unknown): number | null {
   return n;
 }
 
-/** synced_at 的北京时间日历日。无效或缺失就没有发布日，不按过季丢。 */
-export function syncedOn(value: unknown): string | null {
-  if (typeof value !== "string" || !value.trim()) return null;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  return beijingDate(date);
-}
-
 export function parseYufan(body: string, sourceUrl: string): YufanParse {
   let data: unknown;
   try {
@@ -66,7 +57,8 @@ export function parseYufan(body: string, sourceUrl: string): YufanParse {
       weaponHint: text(row.arms_name),
       author: text(row.author_nickname),
       priceText: formatGamePrice(row.price),
-      postedOn: syncedOn(row.synced_at),
+      // synced_at 是镜像整表同步的时间，不是这条方案的发布日，不能拿来收录。
+      postedOn: null,
       sourceUrl,
       popularity: popularity(row.apply_num),
     });

@@ -32,7 +32,7 @@ export type PageFetch = (url: string, init?: PageInit) => Promise<PageResponse>;
 export interface Gathered {
   rows: FeedRow[];
   stale: FeedRow[];
-  rejected: { shape: number; international: number; unmapped: number };
+  rejected: { shape: number; international: number; unmapped: number; undated: number };
   unmapped: string[];
   byMode: Record<string, number>;
   warning: string | null;
@@ -63,7 +63,7 @@ function allow(status: number, body: string, url: string): boolean {
 function classify(raws: readonly RawLoadout[], seasonStart = SEASON_START): Gathered {
   const rows: FeedRow[] = [];
   const stale: FeedRow[] = [];
-  const rejected = { shape: 0, international: 0, unmapped: 0 };
+  const rejected = { shape: 0, international: 0, unmapped: 0, undated: 0 };
   const unmapped: string[] = [];
   const byMode: Record<string, number> = {};
   for (const raw of mergeRaw(raws)) {
@@ -185,7 +185,7 @@ function summarize(sourceName: string, gathered: Gathered, counts: { inserted: n
   return [
     `${sourceName}：新收录 ${counts.inserted}，更新 ${counts.updated}，已有来源 ${counts.kept}`,
     modes ? `按模式 ${modes}` : "",
-    `丢弃格式 ${gathered.rejected.shape}、国际服 ${gathered.rejected.international}、过季 ${gathered.stale.length}、对不上枪 ${gathered.rejected.unmapped}`,
+    `丢弃格式 ${gathered.rejected.shape}、国际服 ${gathered.rejected.international}、无日期 ${gathered.rejected.undated}、过季 ${gathered.stale.length}、对不上枪 ${gathered.rejected.unmapped}`,
     gathered.stale.length ? `其中 ${counts.staleNoted} 条过季日期写回了已有记录` : "",
     unmapped ? `对不上的枪：${unmapped}` : "",
     gathered.warning,

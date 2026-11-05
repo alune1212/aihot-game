@@ -7,7 +7,7 @@ export interface RawLoadout {
   weaponHint: string | null;
   author: string | null;
   priceText: string | null;
-  /** 发布日，YYYY-MM-DD（北京时间）。没有就是 null，不按过季丢。 */
+  /** 来源给出的发布或更新日期，YYYY-MM-DD（北京时间）。没有就不收录。 */
   postedOn: string | null;
   sourceUrl: string;
   /** 应用次数。没有就不参与热度排序。 */
@@ -31,7 +31,7 @@ export interface FeedRow {
 
 export type Decision =
   | { ok: true; row: FeedRow }
-  | { ok: false; reason: "shape" | "international" | "unmapped"; detail?: string }
+  | { ok: false; reason: "shape" | "international" | "unmapped" | "undated"; detail?: string }
   | { ok: false; reason: "stale"; row: FeedRow };
 
 const CN_CODE = /^(.+)-(烽火地带|全面战场|黑潮爆破)-([0-9A-Za-z]{12,})$/;
@@ -99,7 +99,8 @@ export function decideLoadout(raw: RawLoadout, seasonStart = SEASON_START): Deci
     popularity: popularityOf(raw.popularity),
     likes: popularityOf(raw.likes),
   };
-  if (postedOn && postedOn < seasonStart) return { ok: false, reason: "stale", row };
+  if (!postedOn) return { ok: false, reason: "undated" };
+  if (postedOn < seasonStart) return { ok: false, reason: "stale", row };
   return { ok: true, row };
 }
 
