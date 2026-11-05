@@ -23,11 +23,11 @@
 
 | 站 | 抓什么 |
 |---|---|
-| 有力气 | 官方热门。`GET …/official_gun_codes?source=eq.official&is_hidden=eq.false&select=*&order=apply_num.desc`，请求头带公开 anon key。约 100 条，站点每天同步。码用 `solution_code`，枪名用码前缀，对不上再用 `arms_name`。模式在码里。作者是 `author_nickname`。价格是游戏币，写成「60.8万」。应用次数是 `apply_num`，写入 `popularity`，同枪的官方方案之间按它从高到低排。`synced_at` 换成北京时间的日期当发布日。下架（`is_hidden`）和非 `official` 的行不收。页面上标成「官方热门」，不放来源链接。一次最多 1000 条，到顶会在 `note` 里警告。 |
-| 云码库 | 首页，以及 `/loadouts?mode=` 的烽火地带、全面战场、黑潮爆破，按页面上的 `page=` 翻页。`heichao_loadout` 是国际服 BLAST 码，不抓。列表里很多条目只有码尾，对不上完整国服码，直接丢掉。 |
+| 官方热门镜像 | `GET …/official_gun_codes?source=eq.official&is_hidden=eq.false&select=*&order=apply_num.desc`，请求头带公开 anon key。约 100 条，站点每天同步。码用 `solution_code`，枪名用码前缀，对不上再用 `arms_name`。模式在码里。作者是 `author_nickname`。价格是游戏币，写成「60.8万」。应用次数是 `apply_num`。表里没有每条方案的发布或更新时间，只有整表的 `synced_at`，那是镜像同步时间，不当发布日，所以这些行不收录。下架和非 `official` 的行也不收。抓取本身仍记成功，并在结果里写跳过的条数。一次最多 1000 条，到顶会在 `note` 里警告。 |
+| 云码库 | 首页，以及 `/loadouts?mode=` 的烽火地带、全面战场、黑潮爆破，按页面上的 `page=` 翻页。`heichao_loadout` 是国际服 BLAST 码，不抓。列表里很多条目只有码尾，对不上完整国服码，直接丢掉。2026-11-05 的公开列表和作者页都没有每条码的发布日（能按最新发布排序，日期不在 HTML 里，`/api/` 被 robots 禁止），没有日期的不收录。 |
 | 洲械库 | 首页 HTML，加上首页引用的 `/assets/page-*.js`。全量方案和发布日都在这个脚本里（`throughId` 区间，外加少量按 id 的日期）。脚本里站点自己藏起来的 id 不收。脚本抓失败时，仍保留首页已经渲染的那一页。 |
-| 官方改枪台 | `POST https://comm.ams.game.qq.com/ide/`，`method=dfm/solution.arms.list`，`solutionType=gun`。匿名可读。码、作者（`authorNickname`）、应用次数（`applyNum`）和点赞（`likeNum`）写入改枪码；配件和属性仍由 `loadouts.detail` 补。列表没有发布日，开季后又抓到的用抓取时间当日期。读者看到的名字是「官方热门」，不放来源链接。 |
-| 鸟兽兽 | `https://nss.seoml.com/gun`，公开 HTML 的 `data-copy`。2026-11-05 看过公开页：卡片只有枪名、作者和码，没有发布日、更新日期或赛季标记。这里仍然只抓 `/gun`，间隔 1.2 秒。没有日期的，收录时写成这次抓取的北京时间日期。读者看到「鸟兽兽」。 |
+| 官方改枪台 | `POST https://comm.ams.game.qq.com/ide/`，`method=dfm/solution.arms.list`，`solutionType=gun`。匿名可读。码、作者（`authorNickname`）、应用次数（`applyNum`）和点赞（`likeNum`）写入改枪码；配件和属性仍由 `loadouts.detail` 补。每条方案有 `created_at` 和 `updated_at`（不带时区，按北京时间取日历日）。发布日用 `created_at`，没有创建时间才用 `updated_at`。两个都没有的不收录。读者看到的名字是「官方热门」，不放来源链接。 |
+| 鸟兽兽 | `https://nss.seoml.com/gun`，公开 HTML 的 `data-copy`。2026-11-05 看过公开页：卡片只有枪名、作者和码，没有发布日、更新日期或赛季标记，也没有详情页链接。robots 允许 `/gun`，禁止 `/sync`、`/post` 等。这里仍然只抓 `/gun`。没有日期的不收录，抓取仍记成功。 |
 | DFTTK | 不是改枪码。读 `https://dfttk.com/data/v3/manifest.json` 指到的物品中文名、默认烽火排名（一套护甲、弹药和命中分布，排名文件里的 `defaultMin` 米）和 `previewUrl` 里的体验服数值差。不读 `build` / `sharedBuild`。对不上名录的枪只写在 note 里。页面标成社区理论 TTK。数据版本若带 `preview`，注明可能含体验服调整。 |
 | 聪聪梯队 | `https://www.dfgqm.com/tier-list` 上的枪和梯队（S+ 到 C）。robots 允许这一页，禁止 `/api/`。只收梯队，不收这一页上的改枪码。对不上名录的枪丢掉。读者看到「聪聪」，并带上页面写的更新日期。 |
 
@@ -43,7 +43,7 @@
 
 完整国服码，形如 `枪名-烽火地带|全面战场|黑潮爆破-` 再加至少 12 位字母数字。含 `Operations` 或 `Warfare` 的国际服码不要。枪名必须对上 `catalog.ts` 的官方枪；对不上的记在 `loadout_feeds.note` 里，不塞进别的枪。
 
-有发布日、早于当前赛季开季日的不新收录，也不会把删掉的旧码再写回来。来源没给日期时，用这次抓取的时间（云码库和鸟兽兽的公开页都没有每条码的日期；2026-11-05 核对过，云码库能按最新发布排序，但日期不在公开 HTML 里，`/api/` 被 robots 禁止）。官方热门镜像用 `synced_at` 的北京时间日期：早于开季日的不新收录。开季前已经入库、这季又被任一来源抓到、而且这次没有更早的日期，会把日期改成这次抓取时间，之后按本季留下。
+来源没有给出这条码的发布或更新日期，就不收录，抓取时间不算。有日期、早于当前赛季开季日的也不新收录，也不会把删掉的旧码再写回来。文章抽出的码用文章自己的发布时间；文章没有发布时间的不收。没有日期而整站被跳过，只在抓取结果里计数，不把这个来源记成失败。
 
 ## 赛季
 
@@ -55,7 +55,7 @@
 
 ## 删过季的码
 
-`loadouts.cleanup`（上海时间每天 06:10）会删，不是只打标。发布日早于当前赛季的删，没有发布日的也删，官方码一样。来源行和官方详情随外键一起删。开季后又抓到、并且已经写成抓取日或开季后日期的留下。新赛季刚开始时可以一条新码都没有。一轮把该删的都删完，不截断；删之前靠已有的本地 pg_dump。
+`loadouts.cleanup`（上海时间每天 06:10）会删，不是只打标。发布日早于当前赛季的删，没有发布日的也删，官方码一样。来源行和官方详情随外键一起删。来源给出的日期不早于开季日的留下。新赛季刚开始时可以一条新码都没有。一轮把该删的都删完，不截断；删之前靠已有的本地 pg_dump。
 
 不删的情况：
 

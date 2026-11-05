@@ -69,8 +69,8 @@ test("full CN codes are kept, tails and international codes are not, and dated c
     postedOn: null,
     sourceUrl: "https://example.test/c",
   });
-  assert.equal(undated.ok, true);
-  if (undated.ok) assert.equal(undated.row.priceText, null);
+  assert.equal(undated.ok, false);
+  if (!undated.ok) assert.equal(undated.reason, "undated");
 
   for (const code of ["6IAIGQS09IA8FBVB7AGQU", "攻防均衡-BLAST6LEG9M007455B07A3ETOV"]) {
     const decision = decideLoadout({ code, weaponHint: null, author: null, priceText: null, postedOn: null, sourceUrl: "https://example.test" });
@@ -126,8 +126,9 @@ test("yunmaku HTML keeps full codes with author, price and date, and still surfa
   assert.equal(priced?.weaponHint, "R93狙击步枪");
   const decisions = found.map((item) => decideLoadout(item));
   const accepted = decisions.filter((item) => item.ok).map((item) => item.ok ? item.row.code : "");
-  assert.ok(accepted.includes("PTR-32突击步枪-全面战场-6KV8ADK04LFIB29M6GNGK"));
+  assert.equal(accepted.includes("PTR-32突击步枪-全面战场-6KV8ADK04LFIB29M6GNGK"), false);
   assert.ok(accepted.includes("K416突击步枪-烽火地带-6FRESHCODE123456789"));
+  assert.equal(decisions.filter((item) => !item.ok && item.reason === "undated").length, 1);
   assert.equal(decisions.filter((item) => !item.ok && item.reason === "stale").length, 1);
   assert.equal(decisions.filter((item) => !item.ok && item.reason === "international").length, 1);
   assert.equal(decisions.filter((item) => !item.ok && item.reason === "shape").length, 2);
@@ -262,7 +263,7 @@ test("the yufan anon key is the public client default unless overridden", () => 
   assert.equal(formatApplyCount(null), null);
 });
 
-test("yufan official rows map the code, gun, author, price, popularity and Beijing sync date", () => {
+test("yufan official rows map the code, gun, author, price and popularity, and ignore the table sync time", () => {
   const parsed = parseYufan(fixture("yufan.json"), YUFAN_PAGE);
   assert.equal(parsed.rows, 12);
   const codes = parsed.raws.map((item) => item.code);
@@ -273,7 +274,7 @@ test("yufan official rows map the code, gun, author, price, popularity and Beiji
   assert.equal(hot?.author, "鼠哈哈");
   assert.equal(hot?.priceText, "60.8万");
   assert.equal(hot?.popularity, 863888);
-  assert.equal(hot?.postedOn, "2026-10-29");
+  assert.equal(hot?.postedOn, null);
   assert.equal(hot?.sourceUrl, YUFAN_PAGE);
   assert.equal(hot?.weaponHint, "M250通用机枪");
   const fallback = byCode.get("冲锋枪-烽火地带-6P90FALLBACK1234567");
@@ -281,18 +282,17 @@ test("yufan official rows map the code, gun, author, price, popularity and Beiji
   const spaced = parsed.raws.find((item) => item.code.includes("6LEADSPACE123456789"));
   assert.equal(spaced?.author, "天霸Mad98");
   assert.equal(spaced?.priceText, null);
-  assert.equal(spaced?.postedOn, "2026-10-29");
+  assert.equal(spaced?.postedOn, null);
   const edge = byCode.get("M16A4突击步枪-烽火地带-6SEASONEDGE1234567");
-  assert.equal(edge?.postedOn, "2026-09-04");
+  assert.equal(edge?.postedOn, null);
   const undated = byCode.get("G18-烽火地带-6NODATECODE12345678");
   assert.equal(undated?.postedOn, null);
   assert.equal(undated?.popularity, null);
   const decisions = parsed.raws.map((item) => decideLoadout(item));
   const accepted = decisions.filter((item) => item.ok);
-  assert.equal(accepted.length, 7);
-  const p90 = accepted.find((item) => item.ok && item.row.code.includes("6P90FALLBACK1234567"));
-  assert.equal(p90 && p90.ok ? p90.row.weapon : "", "P90冲锋枪");
-  assert.equal(decisions.filter((item) => !item.ok && item.reason === "stale").length, 1);
+  assert.equal(accepted.length, 0);
+  assert.equal(decisions.filter((item) => !item.ok && item.reason === "undated").length, 8);
+  assert.equal(decisions.filter((item) => !item.ok && item.reason === "stale").length, 0);
   assert.equal(decisions.filter((item) => !item.ok && item.reason === "shape").length, 1);
   assert.equal(decisions.filter((item) => !item.ok && item.reason === "unmapped").length, 1);
   assert.throws(() => parseYufan("{}", YUFAN_PAGE), /不是列表/);
@@ -319,12 +319,11 @@ test("yufan reads both robots files, then requests the table with the anon key",
   assert.deepEqual(seen[2]?.headers, yufanApiHeaders());
   assert.equal(api.includes("source=eq.official"), true);
   assert.equal(api.includes("is_hidden=eq.false"), true);
-  assert.equal(gathered.byMode["烽火地带"], 6);
-  assert.equal(gathered.byMode["黑潮爆破"], 1);
+  assert.equal(gathered.rows.length, 0);
+  assert.equal(gathered.rejected.undated, 8);
   assert.deepEqual(gathered.unmapped, ["没这把枪"]);
-  assert.equal(gathered.stale.length, 1);
+  assert.equal(gathered.stale.length, 0);
   assert.equal(gathered.warning, null);
-  assert.equal(gathered.rows.find((row) => row.code.startsWith("M250"))?.popularity, 863888);
 });
 
 test("yufan stops before the api when robots disallow it", async () => {
@@ -364,8 +363,8 @@ test("yufan warns when the official list fills the request cap", async () => {
   };
   const gathered = await gatherYufan(fetchPage, async () => {});
   assert.match(gathered.warning ?? "", /1000/);
-  assert.equal(gathered.rows.length, YUFAN_ROW_CAP);
-  assert.equal(gathered.rows[0]?.popularity, YUFAN_ROW_CAP);
+  assert.equal(gathered.rows.length, 0);
+  assert.equal(gathered.rejected.undated, YUFAN_ROW_CAP);
 });
 
 test("official hot codes sort ahead of streamers, and a repeated code stays with the first feed", async () => {
@@ -488,14 +487,13 @@ test("a fetch stores each feed and records a robots block without dropping the o
   assert.equal(yun.ok, true);
   assert.equal(sj.ok, true);
   assert.equal(yufanSummary.ok, true);
-  assert.equal(yufanSummary.inserted, 7);
-  assert.equal(yufanSummary.stale, 1);
-  assert.equal(yufanSummary.byMode["烽火地带"], 6);
-  assert.equal(yufanSummary.byMode["黑潮爆破"], 1);
+  assert.equal(yufanSummary.inserted, 0);
+  assert.equal(yufanSummary.stale, 0);
+  assert.equal((yufanSummary as { undated?: number }).undated, 8);
   assert.deepEqual(yufanSummary.unmapped, ["没这把枪"]);
   assert.equal(yufanSummary.warning, null);
   assert.equal(yun.byMode["烽火地带"], 1);
-  assert.equal(yun.byMode["全面战场"], 1);
+  assert.equal(yun.byMode["全面战场"], undefined);
   assert.deepEqual(yun.unmapped, ["没这把枪"]);
   assert.equal(sj.byMode["烽火地带"], 2);
   assert.equal(sj.byMode["全面战场"], 1);
@@ -505,8 +503,7 @@ test("a fetch stores each feed and records a robots block without dropping the o
   assert.ok(names.includes("K437突击步枪:洲械库:昊天（三角洲行动）"));
   assert.ok(names.includes("Vector冲锋枪:洲械库:林树"));
   assert.ok(names.some((name) => name.startsWith("K416突击步枪:云码库:昊天")));
-  assert.ok(names.includes("M250通用机枪:官方热门:鼠哈哈"));
-  assert.ok(names.includes("P90冲锋枪:官方热门:巾凡"));
+  assert.equal(names.some((name) => name.includes("官方热门")), false);
   const [health] = await sql<{ health: string; last_error: string | null; note: string | null }[]>`SELECT health, last_error, note FROM loadout_feeds WHERE id = 'sjzgq'`;
   assert.equal(health?.health, "ok");
   assert.equal(health?.last_error, null);
@@ -528,8 +525,5 @@ test("a fetch stores each feed and records a robots block without dropping the o
   const vector = still.categories.find((category) => category.key === "smg")!.weapons.find((weapon) => weapon.name === "Vector冲锋枪")!;
   assert.equal(vector.codes[0]?.author, "林树");
   const m250 = still.categories.find((category) => category.key === "lmg")!.weapons.find((weapon) => weapon.name === "M250通用机枪")!;
-  assert.equal(m250.codes[0]?.source, "官方热门");
-  assert.equal(m250.codes[0]?.sourceUrl, null);
-  assert.equal(m250.codes[0]?.author, "鼠哈哈");
-  assert.equal(m250.codes[0]?.popularityText, "应用 86.4万");
+  assert.equal(m250.codes.length, 0);
 });

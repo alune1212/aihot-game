@@ -2,6 +2,7 @@
 // 2026-10-30 实测：物品/方案图表是 352143 / YWRywA（coolxitech/deltaforce 同一套）。
 // 旧文里的 316969 / NoOapI 不带有效登录会返回 ret 101。352143 目前匿名也能读到方案和交易行均价。
 // 登录失效看 ret 101（未登录）和 ret 107（登录态无效）。这两种都不重试，改走公开表。
+import { beijingDate, beijingMidnight } from "@aihot/contracts/time";
 import { slotName } from "./slots.ts";
 
 export const AMS_URL = "https://comm.ams.game.qq.com/ide/";
@@ -256,6 +257,26 @@ export interface SolutionCodeRow {
   applyNum: number | null;
   likeNum: number | null;
   weaponHint: string | null;
+  /** 发布日。优先 created_at，没有再用 updated_at。都没有就是 null。 */
+  postedOn: string | null;
+}
+
+/**
+ * 官方接口的时间不带时区，时钟已经是北京时间，所以日历日就是字符串里的那一天。
+ * 创建时间优先，没有再用更新时间。
+ */
+export function amsPostedOn(created: unknown, updated: unknown): string | null {
+  return amsDay(created) ?? amsDay(updated);
+}
+
+function amsDay(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const match = /^(\d{4}-\d{2}-\d{2})[ T]\d{2}:\d{2}:\d{2}$/.exec(value.trim());
+  if (!match) return null;
+  const day = match[1]!;
+  const instant = beijingMidnight(day);
+  if (Number.isNaN(instant.getTime()) || beijingDate(instant) !== day) return null;
+  return day;
 }
 
 function countOf(value: unknown): number | null {
@@ -283,6 +304,7 @@ export function parseSolutionCodes(data: unknown): { page: number; total: number
       applyNum: countOf(item.applyNum),
       likeNum: countOf(item.likeNum),
       weaponHint: text(arms?.objectName),
+      postedOn: amsPostedOn(item.created_at, item.updated_at),
     });
   }
   return { page: whole(root.page) ?? 1, total: whole(root.totalCount) ?? items.length, items };

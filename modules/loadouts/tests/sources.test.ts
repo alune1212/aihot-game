@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { after, test } from "node:test";
 import { closeDb, sql } from "@aihot/backend/db";
-import { parseSolutionCodes, readAms } from "../ams.ts";
+import { amsPostedOn, parseSolutionCodes, readAms } from "../ams.ts";
 import { presentBalance } from "../balance.ts";
 import { decideLoadout } from "../codes.ts";
 import { DFTTK_MANIFEST, NSS_ORIGIN, TIER_PAGE, feedEnabled, nssGunUrl, sourceOutranks } from "../feeds.ts";
@@ -30,12 +30,15 @@ test("official solution list keeps author, apply count and likes, and drops bad 
   assert.equal(hot?.applyNum, 267984);
   assert.equal(hot?.likeNum, 1553);
   assert.equal(hot?.weaponHint, "K416突击步枪");
+  assert.equal(hot?.postedOn, "2026-10-15");
+  assert.equal(amsPostedOn(undefined, "2026-11-04 23:30:00"), "2026-11-04");
+  assert.equal(amsPostedOn(null, null), null);
   const decisions = parsed!.items.map((item) => decideLoadout({
     code: item.code,
     weaponHint: item.weaponHint,
     author: item.author,
     priceText: null,
-    postedOn: null,
+    postedOn: item.postedOn,
     sourceUrl: "",
     popularity: item.applyNum,
     likes: item.likeNum,
@@ -63,6 +66,7 @@ test("the official list walks every page and stops when the total is covered", a
       authorNickname: "第二页",
       applyNum: 20,
       likeNum: 2,
+      created_at: "2026-10-02 08:00:00",
       armsDetail: { objectName: "MP5冲锋枪" },
     }];
     return { status: 200, text: () => JSON.stringify(body) };
@@ -91,9 +95,10 @@ test("nss html keeps the full code and author, and a 403 stops later pages", asy
     return { status: 200, text: () => html };
   };
   const gathered = await gatherNss(fetchPage, async () => {});
-  assert.equal(gathered.rows.length, 2);
-  assert.equal(gathered.byMode["烽火地带"], 1);
-  assert.equal(gathered.byMode["全面战场"], 1);
+  assert.equal(gathered.rows.length, 0);
+  assert.equal(gathered.rejected.undated, 2);
+  assert.equal(gathered.byMode["烽火地带"], undefined);
+  assert.equal(gathered.byMode["全面战场"], undefined);
   assert.equal(gathered.rejected.international, 1);
   assert.equal(gathered.rejected.shape, 1);
   assert.match(gathered.warning ?? "", /403/);
@@ -183,6 +188,9 @@ test("a failing official list does not remove codes already stored, and likes su
     now: () => new Date("2026-10-30T01:00:00+08:00"),
   });
   assert.equal(again.ok, true);
+  assert.equal(again.undated, 2);
+  const [nssFeed] = await sql<{ health: string }[]>`SELECT health FROM loadout_feeds WHERE id = 'nss'`;
+  assert.equal(nssFeed?.health, "ok");
   const failed = await fetchAmsCodes({
     fetch: async () => ({ status: 503, text: () => "down" }),
     sleep: async () => {},
@@ -197,7 +205,7 @@ test("a failing official list does not remove codes already stored, and likes su
   assert.equal(code?.popularityText, "应用 26.8万");
   assert.equal(code?.author, "eStar丨Aqing");
   const qcq = listed.categories.find((category) => category.key === "smg")!.weapons.find((weapon) => weapon.name === "QCQ171冲锋枪")!;
-  assert.equal(qcq.codes[0]?.source, "鸟兽兽");
+  assert.equal(qcq.codes.length, 0);
   assert.equal(feedEnabled("LOADOUT_AMS_ENABLED", { COLLECT_ENABLED: "true", LOADOUT_AMS_ENABLED: "false" }), false);
   assert.equal(feedEnabled("LOADOUT_AMS_ENABLED", { COLLECT_ENABLED: "false", LOADOUT_AMS_ENABLED: "true" }), false);
   assert.equal(feedEnabled("LOADOUT_AMS_ENABLED", { COLLECT_ENABLED: "true", LOADOUT_AMS_ENABLED: "true" }), true);

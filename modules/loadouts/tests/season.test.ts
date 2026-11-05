@@ -101,35 +101,29 @@ test("a feed that never succeeded, is blocked by robots, or is turned off does n
   assert.equal(recentFetchFailed([feed({})], now, env), true);
 });
 
-test("a certain season deletes old and undated codes, and a later sighting keeps a code seen again", async () => {
+test("a certain season deletes old codes, and a code without a source date is not stored", async () => {
   await sql`INSERT INTO loadout_seasons (name, number, starts_on, source, confidence, evidence)
     VALUES ('测试季', NULL, '2026-11-05', 'announcement', 'certain', 'fixture')`;
   const fresh = "K416突击步枪-烽火地带-6SEASONFRESH1234567";
   const old = "M4A1突击步枪-烽火地带-6SEASONOLDCODE12345";
-  const seenAgain = "Vector冲锋枪-全面战场-6SEENAGAIN12345678";
-  const at = new Date("2026-11-06T01:00:00Z");
-  await saveFeedLoadout(sql, "nss", {
+  const undated = "Vector冲锋枪-全面战场-6SEENAGAIN12345678";
+  const at = new Date("2026-11-07T01:00:00Z");
+  await saveFeedLoadout(sql, "sjzgq", {
     categoryKey: "rifle", weapon: "K416突击步枪", code: fresh, mode: "烽火地带", priceText: null, author: "甲",
-    sourceUrl: "https://nss.example/gun", postedOn: "2026-11-06", popularity: 2,
-  }, at, "2026-11-05");
+    sourceUrl: "https://sjzgq.example/", postedOn: "2026-11-06", popularity: 2,
+  }, at);
   await saveFeedLoadout(sql, "sjzgq", {
     categoryKey: "rifle", weapon: "M4A1突击步枪", code: old, mode: "烽火地带", priceText: null, author: "乙",
     sourceUrl: "https://sjzgq.example/", postedOn: "2026-08-01", popularity: null,
   }, at);
-  await saveFeedLoadout(sql, "nss", {
-    categoryKey: "smg", weapon: "Vector冲锋枪", code: seenAgain, mode: "全面战场", priceText: null, author: "丙",
+  assert.equal(await saveFeedLoadout(sql, "nss", {
+    categoryKey: "smg", weapon: "Vector冲锋枪", code: undated, mode: "全面战场", priceText: null, author: "丙",
     sourceUrl: "https://nss.example/gun", postedOn: null, popularity: null,
-  }, new Date("2026-10-02T01:00:00Z"));
-  await saveFeedLoadout(sql, "yunmaku", {
-    categoryKey: "smg", weapon: "Vector冲锋枪", code: seenAgain, mode: "全面战场", priceText: null, author: "丙",
-    sourceUrl: "https://www.yunmaku.com/loadouts", postedOn: null, popularity: null,
-  }, at, "2026-11-05");
-  const [restamped] = await sql<{ noted_at: Date }[]>`SELECT noted_at FROM loadout_codes WHERE code = ${seenAgain}`;
-  assert.equal(restamped ? beijingDate(restamped.noted_at) : null, "2026-11-06");
-  assert.equal(await saveFeedLoadout(sql, "sjzgq", {
-    categoryKey: "rifle", weapon: "M4A1突击步枪", code: old, mode: "烽火地带", priceText: null, author: "乙",
-    sourceUrl: "https://sjzgq.example/", postedOn: "2026-08-01", popularity: null,
-  }, at, "2026-11-05"), "kept");
+  }, at), "kept");
+  const [missing] = await sql`SELECT id FROM loadout_codes WHERE code = ${undated}`;
+  assert.equal(missing, undefined);
+  const [freshNoted] = await sql<{ noted_at: Date }[]>`SELECT noted_at FROM loadout_codes WHERE code = ${fresh}`;
+  assert.equal(freshNoted ? beijingDate(freshNoted.noted_at) : null, "2026-11-06");
   const dry = await cleanupOutOfSeason({ db: sql, now: new Date("2026-11-06T04:00:00Z"), dryRun: true });
   assert.equal(dry.deleted, 0);
   const [still] = await sql<{ id: number }[]>`SELECT id FROM loadout_codes WHERE code = ${old}`;
@@ -142,9 +136,7 @@ test("a certain season deletes old and undated codes, and a later sighting keeps
   const [gone] = await sql`SELECT id FROM loadout_codes WHERE code = ${old}`;
   assert.equal(gone, undefined);
   const [keptFresh] = await sql`SELECT id FROM loadout_codes WHERE code = ${fresh}`;
-  const [keptSeen] = await sql`SELECT id FROM loadout_codes WHERE code = ${seenAgain}`;
   assert.ok(keptFresh);
-  assert.ok(keptSeen);
 });
 
 test("authorless yunmaku with no other source and no official detail ranks last and is dropped", async () => {
