@@ -1,10 +1,11 @@
 // JSON sources: plain JSON APIs, JSON embedded in HTML (script tags, window variables).
+import { setTimeout } from "node:timers/promises";
 import { credential } from "../config.ts";
 import { languageHeaders, requireOk } from "../lib/http-fetch.ts";
 import { JINA_PREFIX, jinaRead } from "../providers/jina.ts";
 import { fetchListing } from "./listing-fetch.ts";
 import { sanitizeBody } from "../content/sanitize.ts";
-import { collapseWhitespace, stripTags } from "../lib/text.ts";
+import { collapseWhitespace, escapeXml, stripTags } from "../lib/text.ts";
 import { readPublicationDate, type PublicationDate } from "./dates.ts";
 import { FetchError, type Candidate, type SourceRow } from "./types.ts";
 
@@ -18,6 +19,47 @@ export function getPath(obj: unknown, path: string): unknown {
     else return undefined;
   }
   return cur;
+}
+
+/** Same-host gap for sources that set minRequestGapMs. Concurrent lists of one API share it. */
+const hostGap = new Map<string, { tail: Promise<void>; at: number }>();
+
+async function paceHost(url: string, gapMs: number): Promise<void> {
+  if (!Number.isFinite(gapMs) || gapMs <= 0) return;
+  let host: string;
+  try { host = new URL(url).hostname; } catch { return; }
+  const slot = hostGap.get(host) ?? { tail: Promise.resolve(), at: 0 };
+  const run = slot.tail.then(async () => {
+    const wait = gapMs - (Date.now() - slot.at);
+    if (wait > 0) await setTimeout(wait);
+    slot.at = Date.now();
+  });
+  slot.tail = run.then(() => {}, () => {});
+  hostGap.set(host, slot);
+  await run;
+}
+
+/** An http(s) image address. A protocol-relative cover (`//cdn/...`) becomes https. */
+function httpUrl(value: string): string | null {
+  const text = value.trim();
+  if (!text) return null;
+  try {
+    const url = new URL(text.startsWith("//") ? `https:${text}` : text);
+    if ((url.protocol !== "http:" && url.protocol !== "https:") || url.username || url.password) return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+function coverImage(item: unknown, paths: string[] | undefined): { kind: "image"; url: string; alt: null } | null {
+  for (const path of paths ?? []) {
+    const value = getPath(item, path);
+    if (typeof value !== "string") continue;
+    const url = httpUrl(value);
+    if (url) return { kind: "image", url, alt: null };
+  }
+  return null;
 }
 
 function firstString(obj: unknown, paths: string[] | undefined): string | null {
@@ -149,6 +191,7 @@ async function jsonDetailBody(c: SourceRow["config"], item: unknown, pageUrl: st
   const bodyUrl = renderTemplate(String(c.bodyUrlTemplate), item);
   if (!bodyUrl) return null;
   try {
+    await paceHost(bodyUrl, Number(c.minRequestGapMs) || 0);
     const detail = JSON.parse(requireOk(await fetchListing(bodyUrl, { redirectPolicy: "same-origin", headers, timeoutMs: 15_000 })).text());
     const field = getPath(detail, String(c.bodyPath));
     if (typeof field !== "string" || !field.trim()) return null;
@@ -168,6 +211,7 @@ export async function fetchJsonList(source: SourceRow): Promise<Candidate[]> {
     const token = credential("collectors", "GITHUB_TOKEN");
     if (token) headers.authorization = `Bearer ${token}`;
   }
+  await paceHost(url, Number(c.minRequestGapMs) || 0);
   const embedded = c.mode === "html_json_key" || c.mode === "html_window_var";
   // A page that blocks our addresses can be read through Jina's rendered HTML, which keeps its scripts.
   const text = embedded && url.startsWith(JINA_PREFIX)
@@ -194,34 +238,50 @@ export async function fetchJsonList(source: SourceRow): Promise<Candidate[]> {
   if ((c.bodyUrlTemplate && !c.bodyPath) || (c.bodyPath && !c.bodyUrlTemplate)) throw new FetchError("bodyUrlTemplate and bodyPath are set together");
 
   const out: Candidate[] = [];
+  let mapped = 0;
   for (const item of items) {
     if (c.requireBoolean && getPath(item, c.requireBoolean.path) !== c.requireBoolean.equals) continue;
     if (c.minNumeric && !(Number(getPath(item, c.minNumeric.path)) >= Number(c.minNumeric.min))) continue;
     const title = firstString(item, c.titlePaths);
     const url = (c.urlTemplate && renderTemplate(c.urlTemplate, item)) || (c.urlTemplateFallback && renderTemplate(c.urlTemplateFallback, item));
     if (!title || !url) continue;
+    mapped += 1;
+    const published = toDate(getPath(item, c.publishedAtPath), c.publishedAtUnit, c.publishedAtUtcOffset);
+    // A missing source date is not filled with the time we fetched it.
+    if (c.requirePublishedAt === true && !published.publishedAt) continue;
     const externalId = c.externalIdPath ? getPath(item, c.externalIdPath) : null;
     const summary = firstString(item, c.summaryPaths);
     // A text alternate (.patch and the like) replaces a declared summary, same as RSS. The JSON
     // detail document is a different body: it still wins when summaryIsBody is off.
     const summaryIsBody = !c.detail?.bodyUrlSuffix && c.summaryIsBody === true && !!summary;
+    const cover = coverImage(item, c.imagePaths);
     const body = summaryIsBody ? null : await jsonDetailBody(c, item, url, headers);
     // A configured detail document is the body. No words there (or a failed read) is unconfirmed,
     // so a script-rendered article page is not fetched, with or without a reader key.
     // bodyUrlSuffix still needs that fetch, so it stays pending instead of unconfirmed.
     const detailConfigured = !summaryIsBody && !c.detail?.bodyUrlSuffix && !!(c.bodyUrlTemplate && c.bodyPath);
+    let bodyHtml = body?.html ?? null;
+    let bodyText = summaryIsBody ? stripTags(summary!) : body?.text ?? null;
+    // summaryIsBody is the article. A cover sits in that HTML so the page can show it; the text stays the summary.
+    if (summaryIsBody && summary) {
+      const img = cover ? `<p><img src="${escapeXml(cover.url)}" alt=""></p>` : "";
+      bodyHtml = sanitizeBody(`${img}<p>${escapeXml(summary)}</p>`, url);
+      bodyText = collapseWhitespace(stripTags(bodyHtml)) || stripTags(summary);
+    }
     out.push({
       url,
       title: collapseWhitespace(stripTags(title)),
       author: firstString(item, c.authorPaths),
-      ...toDate(getPath(item, c.publishedAtPath), c.publishedAtUnit, c.publishedAtUtcOffset),
+      ...published,
       excerpt: summary ? collapseWhitespace(stripTags(summary)).slice(0, 2000) : null,
-      bodyHtml: body?.html ?? null,
-      bodyText: summaryIsBody ? stripTags(summary!) : body?.text ?? null,
+      bodyHtml,
+      bodyText,
       bodyStatus: summaryIsBody || body ? "ok" : detailConfigured ? "unconfirmed" : "pending",
+      ...(cover ? { media: [cover] } : {}),
       raw: { externalId: externalId ?? null },
     });
   }
-  if (items.length > 0 && out.length === 0 && !c.requireBoolean && !c.minNumeric) throw new FetchError("no items mapped (check title/url paths)");
+  if (items.length > 0 && mapped === 0 && !c.requireBoolean && !c.minNumeric) throw new FetchError("no items mapped (check title/url paths)");
+  if (c.requirePublishedAt === true && mapped > 0 && out.length === 0) throw new FetchError("no items with a publication date");
   return out;
 }
