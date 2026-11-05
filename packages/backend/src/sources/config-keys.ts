@@ -20,6 +20,7 @@ const KEYS: Record<SourceRow["kind"], string[]> = {
     "bodyUrlTemplate", "bodyPath",
     "urlTemplate", "urlTemplateFallback", "rawDropKeys", "requireBoolean", "minNumeric",
     "imagePaths", "requirePublishedAt", "minRequestGapMs",
+    "videoVidPath", "videoInfoUrlTemplate", "videoTagPath", "videoDurationPath",
   ],
   // X accounts are mostly read in shards, which apply only these.
   x_search: [...PUBLISHER, "_aihot", "ingestNoiseFilter", "itemUrlPrefixRewrite", "query", "searchType"],
@@ -77,6 +78,7 @@ export function unsupportedConfig(kind: SourceRow["kind"], config: Record<string
     else if (key === "requirePublishedAt" && typeof value !== "boolean") out.push(key);
     else if (key === "minRequestGapMs" && (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > 10_000)) out.push(key);
     else if (key === "imagePaths" && (!Array.isArray(value) || !value.every((p) => typeof p === "string" && p.trim()))) out.push(key);
+    else if ((key === "videoVidPath" || key === "videoInfoUrlTemplate" || key === "videoTagPath" || key === "videoDurationPath") && (typeof value !== "string" || !value.trim())) out.push(key);
     else if (key === "publisherUrlPrefixes" && (!Array.isArray(value) || !value.every((v) => {
       if (typeof v !== "string") return false;
       try { const u = new URL(v); return /^https?:$/.test(u.protocol) && !u.username && !u.password && !u.search && !u.hash; } catch { return false; }

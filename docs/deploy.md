@@ -58,10 +58,48 @@ MCP 默认接受 `SITE_URL` 的主机以及 `localhost`、`127.0.0.1`、`[::1]`�
 
 ### 更新
 
+**2026 年 11 月攻略全文和官网视频正文。** 没有新的环境变量，也没有迁移。种子导入遇到已有 id 会跳过，所以已经部署的库要自己改。
+
+游侠网 `df-ali213-guides` 和 3DM `df-3dm-guides` 的正文之前已经抓到（`body_status=ok`），只是 `site_fulltext` 关着，公开页只有导读。打开全文后重新发布，不用再抓页面：
+
+```sql
+UPDATE sources SET site_fulltext = true, updated_at = now()
+WHERE id IN ('df-ali213-guides', 'df-3dm-guides');
+```
+
+然后在仓库根目录执行（会按当前正文重写公开页，不调用模型）：
+
+```bash
+node --env-file=.env --input-type=module -e '
+import { republishSource } from "@aihot/backend/publication/publish";
+import { closeDb } from "@aihot/backend/db";
+for (const id of ["df-ali213-guides", "df-3dm-guides"]) console.log(id, await republishSource(id));
+await closeDb();
+'
+```
+
+官网三个视频频道的正文原来只有封面和一行简介。现在正文是播放器用的 mp4（`<video>`，不是 iframe）、简介、标签、来源给出的发布时间和时长，以及官网播放页链接。详情接口的 `sContent` 是空的，没有更长的文案，所以不另请求它，也不打开播放页。播放地址带 vkey，会过期；视频还在当前列表里时，下次抓取会换新地址，文字不变就不重新分析。先把配置写进库，再让这三源马上再抓一次：
+
+```sql
+UPDATE sources SET
+  config = config || jsonb_build_object(
+    'videoVidPath', 'sVID',
+    'videoInfoUrlTemplate', 'https://vv.video.qq.com/getinfo?vids={raw:sVID}&platform=101001&charge=0&otype=json&defn=shd',
+    'videoTagPath', 'sTagInfo',
+    'videoDurationPath', 'iTime'),
+  next_fetch_at = now(),
+  updated_at = now()
+WHERE id IN ('df-official-video-guides', 'df-official-videos', 'df-official-devlog');
+```
+
+要 `COLLECT_ENABLED=true`，worker 会在下一分钟抓取。还在列表里的条目会换成新正文并重新分析（要 `MODEL_CALLS_ENABLED=true` 才会重写导读）。已经滑出当前列表的旧视频不会自动补，播放页链接仍在。
+
+3DM 短文（例如 `gl/357871.html`）页面本身只有两段话和一张图，后面的「完整攻略」是下载 App 的二维码，没有下一页。正文抽取会留下那段话和内容图，不会把二维码和广告算进正文。
+
 **2026 年 11 月增加攻略、视频和开发日志信源。** 没有新的环境变量，也不改已有文章。按下面的更新顺序跑种子导入即可：新的 id 会补进信源表，已经存在的 id 不会被覆盖。采集仍只在 `COLLECT_ENABLED=true` 时自动跑。这五个信源默认开着，不用再设开关。
 
-- 官网攻略视频 `df-official-video-guides`、官网视频 `df-official-videos`：30 分钟。官网开发日志 `df-official-devlog`：60 分钟。都是原来的 AMS 列表（`typeids=2`），请求带 `Referer: https://df.qq.com/`，同一主机至少隔 2 秒。正文用接口简介，没有简介就用标题，并带封面。不把播放页当空正文去抓。
-- 游侠网攻略 `df-ali213-guides`、3DM 攻略 `df-3dm-guides`：30 分钟。时间用列表上的北京时间（已和文章页的发布时间对过）。没有发布时间的条目不收。全文默认不在站内展示。
+- 官网攻略视频 `df-official-video-guides`、官网视频 `df-official-videos`：30 分钟。官网开发日志 `df-official-devlog`：60 分钟。都是原来的 AMS 列表（`typeids=2`），请求带 `Referer: https://df.qq.com/`，同一主机至少隔 2 秒。不把播放页当正文去抓。
+- 游侠网攻略 `df-ali213-guides`、3DM 攻略 `df-3dm-guides`：30 分钟。时间用列表上的北京时间（已和文章页的发布时间对过）。没有发布时间的条目不收。站内展示全文。
 
 每天一条的每日密码按各自的日期归组，不会并成同一件事。
 
