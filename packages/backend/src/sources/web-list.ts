@@ -364,6 +364,8 @@ export async function fetchWebList(source: SourceRow): Promise<Candidate[]> {
   else if (mode === "markdown_changelog") out = fromMarkdownChangelog(text, base, source);
   else if (mode === "intercom_changelog") out = fromIntercomChangelog(text, base, source);
   else out = fromHtml(text, base, source);
+  // Drop entries the source itself did not date. The fetch time is not a publication time.
+  if (source.config.requirePublishedAt === true) out = out.filter((item) => item.publishedAt);
   if (out.length === 0) throw new FetchError(`no items matched (${mode})`);
   return out;
 }

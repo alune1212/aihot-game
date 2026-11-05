@@ -80,7 +80,7 @@
 
 - `itemSelector` 在整个页面找条目；`linkSelector`、`titleSelector` 在每个条目内取第一个匹配节点，也可以匹配条目自身。选 `.news-list` 只会得到一个容器，通常只取到第一条新闻；只写 `div` 又会混入嵌套容器。要选重复出现的新闻节点。
 - 链接取自 `href`；`/posts/first` 等相对链接按列表重定向后的最终地址解析，也可用 `baseUrl` 指定基准地址。标题取节点文字。重复链接会合并；Markdown 列表先出现“Read more”等按钮、后出现真实标题时，使用真实标题。指向列表自身的链接通常会跳过。
-- 日期在条目内查找 `publishedAtSelector`，依次尝试 `datetime`、`content`、`title` 属性和文字，无法解析的提示文字不会遮住同一节点的有效日期。没有时区的日期时间可用 `publishedAtUtcOffset`（默认 `+08:00`）；自带时区的时间保留原时区语义，纯 `YYYY-MM-DD` 按 UTC 零点读。不完整的月份、产品版本号和不存在的日历日期不作为发布日期。
+- 日期在条目内查找 `publishedAtSelector`，依次尝试 `datetime`、`content`、`title` 属性和文字，无法解析的提示文字不会遮住同一节点的有效日期。没有时区的日期时间可用 `publishedAtUtcOffset`（默认 `+08:00`）；自带时区的时间保留原时区语义，纯 `YYYY-MM-DD` 按 UTC 零点读。不完整的月份、产品版本号和不存在的日历日期不作为发布日期。`requirePublishedAt: true` 时，列表上没有发布时间的条目直接丢掉，不用抓取时间顶上。
 - `parseMode`：普通网页默认 `html`；`markdown` 按 Markdown 链接读；`docusaurus_changelog` 读更新日志标题；`markdown_changelog` 读带 `{% id="锚点" %}` 的二级标题，标题当条目名，下面直到下一个同级标题的 Markdown 当正文，链接是列表地址加这个锚点；`intercom_changelog` 按 Intercom 帮助中心的日期章节读取标题和正文，每节保留自己的网址锚点，默认按 UTC 日历日读取，也可指定 `publishedAtUtcOffset`。需要 Jina 时，显式把 `url` 写成 `https://r.jina.ai/https://目标站/路径` 并配置 `JINA_API_KEY`，不是抓不到就自动切换。Jina 默认返回 Markdown；要继续使用 CSS 选择器，显式设 `parseMode: "html"`。
 - `detail`：列表缺日期、标题或摘要时抓详情页补齐（`publishedAtSelector`、`titleSelector`、`summarySelector` 等）。`maxFetches` 是每轮最多读几篇详情页，不设时为 0，即一篇都不读：每读一篇就多一次请求，所以要信源自己声明。读取失败或本轮 `maxFetches` 用完的条目，后续抓取继续补全；补元数据时保留已确认的正文。已有真实标题不会因为列表仍写“Read the Blog”而被换回按钮文字，也不会仅因标题较长再次读取详情。需要强制使用详情标题时设置 `titleAuthoritative: true`。详情页和正文提取读到不带时区的时间时，先用 `detail.publishedAtUtcOffset`，未设则继承信源的 `publishedAtUtcOffset`，两处都未设时默认 `+08:00`。`bodyUrlSuffix`（例如 `.patch`）让正文改读文章网址加上这个后缀的文本；读者看到的文章网址不变。设了它，RSS 里再长的摘要、JSON 列表里声明的 `summaryIsBody` 都不再当成正文。RSS、JSON 列表也可以用 `detail`。
 - Jina 列表的 `detail.titleRegex`、`publishedAtRegex` 匹配 Jina 文本，可共用同一次详情响应；CSS 选择器读取原站 HTML。应按实际可读取的页面选择规则。
@@ -127,6 +127,9 @@
 - `bodyUrlTemplate` 与 `bodyPath` 一起用：列表没有正文，但每条能拼出一个返回 JSON 的详情地址时。模板写法和 `urlTemplate` 相同，`bodyPath` 指向详情里的 HTML 或文字。取到非空文字就当正文，不再去抓原文页。详情失败，或正文只有图片、没有文字时，这条记为正文未确认，不再去抓原文页，按标题和摘要继续。只写其中一项会让这次抓取失败。同时又设了 `detail.bodyUrlSuffix` 时，详情文档没取到文字就改为待抓取，去读后缀地址，而不是记成未确认。
 - 日期建议返回带时区的 ISO 字符串；`2026-09-30 17:43:58` 这类不带时区的时间，与网页列表一样按 `publishedAtUtcOffset` 读（默认 `+08:00`）；数字时间戳分别设 `publishedAtUnit: "epoch_s"`（秒）或 `"epoch_ms"`（毫秒），`20261001` 这类日期设 `"yyyymmdd"`。
 - 缺少标题或无法生成链接的条目会跳过。非空数组全部映射失败时，会报 `no items mapped (check title/url paths)`；路径不是数组时，会报 `items path did not resolve to an array`。
+- `requirePublishedAt: true` 时，没有发布时间的条目不收录，抓取时间不能当成发布时间。条目都映射上了但一条日期都没有，这次抓取失败（`no items with a publication date`），避免悄悄收成空列表。
+- `imagePaths`：封面图字段，按顺序取第一个 http(s) 地址。`//` 开头的补成 https。取到的图记进媒体；同时设了 `summaryIsBody` 时，也放进正文 HTML，文字仍是摘要。
+- `minRequestGapMs`：这个信源访问同一主机的列表和详情至少间隔这么多毫秒（0 到 10000 的整数）。几个信源读同一个接口时共用这段间隔。不设就是不等。
 
 ### 本地跑通 HTML/JSON 示例
 

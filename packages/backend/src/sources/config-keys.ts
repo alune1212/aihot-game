@@ -12,12 +12,14 @@ const KEYS: Record<SourceRow["kind"], string[]> = {
   web_list: [
     ...COLLECTED, "url", "baseUrl", "parseMode", "adapter", "cacheToleranceSeconds", "linksStartLine", "preserveUrlFragment",
     "itemSelector", "linkSelector", "titleSelector", "publishedAtSelector", "publishedAtRegex", "publishedAtUtcOffset",
+    "requirePublishedAt",
   ],
   json_list: [
     ...COLLECTED, "url", "mode", "method", "headers", "bodyJson", "jsonKey", "windowVar", "itemsPath", "itemsObjectValues",
     "titlePaths", "summaryPaths", "summaryIsBody", "authorPaths", "publishedAtPath", "publishedAtUnit", "publishedAtUtcOffset", "externalIdPath",
     "bodyUrlTemplate", "bodyPath",
     "urlTemplate", "urlTemplateFallback", "rawDropKeys", "requireBoolean", "minNumeric",
+    "imagePaths", "requirePublishedAt", "minRequestGapMs",
   ],
   // X accounts are mostly read in shards, which apply only these.
   x_search: [...PUBLISHER, "_aihot", "ingestNoiseFilter", "itemUrlPrefixRewrite", "query", "searchType"],
@@ -72,6 +74,9 @@ export function unsupportedConfig(kind: SourceRow["kind"], config: Record<string
       || value && (!Array.isArray(config.publisherUrlPrefixes) || config.publisherUrlPrefixes.length === 0))) out.push(key);
     else if (key === "publishedAfter" && !utcInstant(value)) out.push(key);
     else if (key === "acceptLanguage" && (typeof value !== "string" || !ACCEPT_LANGUAGE.test(value))) out.push(key);
+    else if (key === "requirePublishedAt" && typeof value !== "boolean") out.push(key);
+    else if (key === "minRequestGapMs" && (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > 10_000)) out.push(key);
+    else if (key === "imagePaths" && (!Array.isArray(value) || !value.every((p) => typeof p === "string" && p.trim()))) out.push(key);
     else if (key === "publisherUrlPrefixes" && (!Array.isArray(value) || !value.every((v) => {
       if (typeof v !== "string") return false;
       try { const u = new URL(v); return /^https?:$/.test(u.protocol) && !u.username && !u.password && !u.search && !u.hash; } catch { return false; }
