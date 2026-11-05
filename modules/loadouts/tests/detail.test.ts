@@ -229,3 +229,28 @@ test("a gun picture is recorded from the official list even when that code is no
   assert.equal(row.partCount, 0);
   assert.deepEqual(row.parts, []);
 });
+
+test("a stored numeric slot label is replaced on the detail page", async () => {
+  const code = "复合弓-烽火地带-6BOWDETAIL000001";
+  await sql`DELETE FROM loadout_codes WHERE code = ${code}`;
+  const [row] = await sql<{ id: number }[]>`
+    INSERT INTO loadout_codes (game_id, category_key, weapon, code, mode, author, source, noted_at)
+    VALUES ('delta-force', 'special', '复合弓', ${code}, '烽火地带', '测试', 'ams', now())
+    RETURNING id`;
+  await sql`INSERT INTO loadout_details (loadout_id, source, gun_object_id, payload)
+    VALUES (${row!.id}, 'ams', 18080000001, ${sql.json({
+      source: "ams",
+      name: "腰射复合弓",
+      previewPic: null,
+      gun: { objectId: 18080000001, name: "复合弓", pic: null, grade: 4 },
+      properties: null,
+      slots: [
+        { slotId: "55", slotName: "槽位 55", objectId: 5501, name: "复合弓增强弓弦", pic: null, grade: 4, effects: [] },
+        { slotId: "77", slotName: "槽位 77", objectId: 7701, name: "神秘零件", pic: null, grade: 3, effects: [] },
+      ],
+    })})`;
+  const detail = await loadoutDetail(sql, row!.id);
+  assert.equal(detail?.detail?.slots[0]?.slotName, "弓弦");
+  assert.equal(detail?.detail?.slots[1]?.slotName, "其他配件");
+  assert.equal(/槽位\s*\d+/.test(JSON.stringify(detail?.detail?.slots)), false);
+});
