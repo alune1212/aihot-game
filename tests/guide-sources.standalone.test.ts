@@ -1,7 +1,6 @@
 // Official video lists and the two guide pages, parsed from the markup and JSON they returned
-// on 2026-11-05. A video with no article text keeps the API blurb (or the title) and its cover,
-// so the body job does not open the player page and record a failed extract. Guide items without
-// a source date are dropped. Two days of 每日密码 stay two articles.
+// on 2026-11-05. A video body is the player's mp4 plus the list's own caption, not the player page.
+// Guide items without a source date are dropped. Two days of 每日密码 stay two articles.
 import "./setup.ts";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -10,12 +9,12 @@ import path from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { config } from "@aihot/backend/config";
-import { pageFetchable } from "@aihot/backend/content/extract";
+import { pageFetchable, readable } from "@aihot/backend/content/extract";
 import { waitsForPage } from "@aihot/backend/editorial/analyze";
 import { promptText } from "@aihot/backend/editorial/prompts";
 import { missingEvidence } from "@aihot/backend/editorial/writing";
 import { unsupportedConfig } from "@aihot/backend/sources/config-keys";
-import { fetchJsonList } from "@aihot/backend/sources/json-list";
+import { fetchJsonList, tencentPlayableMp4 } from "@aihot/backend/sources/json-list";
 import { fetchWebList } from "@aihot/backend/sources/web-list";
 import { identityKeyForUrl } from "@aihot/backend/lib/url";
 
@@ -26,7 +25,7 @@ const devlogJson = read("df-video-devlog.json");
 const aliHtml = read("ali213-newgl.html");
 const dmHtml = read("3dm-gl.html");
 const pack = JSON.parse(readFileSync(path.join(fixtureDir, "../../../industry/sources.json"), "utf8")) as {
-  sources: Array<{ id: string; kind: "json_list" | "web_list"; config: Record<string, unknown> }>;
+  sources: Array<{ id: string; kind: "json_list" | "web_list"; site_fulltext?: boolean; config: Record<string, unknown> }>;
 };
 const packed = (id: string) => {
   const source = pack.sources.find((item) => item.id === id);
@@ -56,6 +55,16 @@ const pages: Record<string, () => string> = {
 const server = http.createServer((req, res) => {
   const url = req.url ?? "";
   seen.push({ path: url, referer: req.headers.referer });
+  if (url.startsWith("/getinfo-fail")) {
+    res.writeHead(500, { "content-type": "text/plain" });
+    return res.end("down");
+  }
+  if (url.startsWith("/getinfo")) {
+    const vid = new URL(url, "http://fixture.local").searchParams.get("vids") ?? "clip";
+    const payload = { em: 0, vl: { vi: [{ drm: 0, fn: `${vid}.mp4`, fvkey: "KEY1", ul: { ui: [{ url: "http://203.0.113.5/vhot2.qqvideo.tc.qq.com/room/" }] } }] } };
+    res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
+    return res.end(`QZOutputJson=${JSON.stringify(payload)};`);
+  }
   const body = Object.hasOwn(pages, url) ? pages[url] : undefined;
   res.writeHead(body ? 200 : 404, { "content-type": url.endsWith(".json") ? "application/json" : "text/html; charset=utf-8" });
   res.end(body ? body() : "");
@@ -70,7 +79,10 @@ after(() => {
 });
 
 const row = (config: Record<string, unknown>) => ({ id: "fixture", config }) as never;
-const videoConfig = (id: string, url: string) => ({ ...packed(id).config, url, minRequestGapMs: 0 });
+const videoConfig = (id: string, url: string, info?: string) => ({
+  ...packed(id).config, url, minRequestGapMs: 0,
+  videoInfoUrlTemplate: info ?? `${site}/getinfo?vids={raw:sVID}`,
+});
 
 test("the new source configs are ones these collectors implement", () => {
   for (const id of ["df-official-video-guides", "df-official-videos", "df-official-devlog", "df-ali213-guides", "df-3dm-guides"]) {
@@ -78,7 +90,9 @@ test("the new source configs are ones these collectors implement", () => {
     assert.deepEqual(unsupportedConfig(source.kind, source.config), [], id);
   }
   assert.deepEqual(unsupportedConfig("json_list", { imagePaths: [1], minRequestGapMs: 1.5, requirePublishedAt: "yes" }), ["imagePaths", "minRequestGapMs", "requirePublishedAt"]);
-  assert.deepEqual(unsupportedConfig("web_list", { requirePublishedAt: true, minRequestGapMs: 2000 }), ["minRequestGapMs"]);
+    assert.deepEqual(unsupportedConfig("web_list", { requirePublishedAt: true, minRequestGapMs: 2000 }), ["minRequestGapMs"]);
+  assert.equal(packed("df-ali213-guides").site_fulltext, true);
+  assert.equal(packed("df-3dm-guides").site_fulltext, true);
 });
 
 test("official video items keep a playable page, a dated blurb and a cover, and skip undated rows", async () => {
@@ -88,9 +102,19 @@ test("official video items keep a playable page, a dated blurb and a cover, and 
   assert.equal(guides[0]!.title, "全面战场UE5规格地图【天际港】，11月5日，破浪登陆！");
   assert.equal(guides[0]!.publishedAt?.toISOString(), "2026-11-02T07:55:18.000Z");
   assert.equal(guides[0]!.bodyStatus, "ok");
-  assert.equal(guides[0]!.bodyText, "【天际港】 | UE5规格呈现");
-  assert.match(guides[0]!.bodyHtml ?? "", /<img src="https:\/\/static\.gametalk\.qq\.com\/image\/423\/1793605699_4a47a0db6e60853dedfcfdf08a5ca249\.png"/);
+  assert.equal(seen.find((hit) => hit.path.startsWith("/getinfo"))?.referer, "https://v.qq.com/");
+  const file = "https://vhot2.qqvideo.tc.qq.com/room/v33716oedb4.mp4?vkey=KEY1";
+  assert.match(guides[0]!.bodyHtml ?? "", new RegExp(`<video[^>]*src="${file.replace(/[?]/g, "\\?")}"`));
+  assert.match(guides[0]!.bodyHtml ?? "", /<source [^>]*type="video\/mp4"/);
+  assert.doesNotMatch(guides[0]!.bodyHtml ?? "", /<iframe/);
+  assert.match(guides[0]!.bodyText ?? "", /【天际港】 \| UE5规格呈现/);
+  assert.match(guides[0]!.bodyText ?? "", /标签：视频、新官网视频、宣传短片/);
+  assert.match(guides[0]!.bodyText ?? "", /发布时间：2026-11-02 15:55:18/);
+  assert.match(guides[0]!.bodyText ?? "", /时长：155 秒/);
+  assert.match(guides[0]!.bodyText ?? "", /官网播放页/);
+  assert.ok((guides[0]!.bodyText ?? "").length > 80, guides[0]!.bodyText ?? "");
   assert.equal(guides[0]!.media?.[0]?.url, "https://static.gametalk.qq.com/image/423/1793605699_4a47a0db6e60853dedfcfdf08a5ca249.png");
+  assert.equal(guides[0]!.media?.[1]?.url, file);
   const play = new URL(guides[0]!.url);
   assert.equal(play.origin + play.pathname, "https://df.qq.com/cp/a20240906main/videodetail.html");
   assert.equal(play.searchParams.get("id"), "v33716oedb4");
@@ -108,9 +132,17 @@ test("official video items keep a playable page, a dated blurb and a cover, and 
   assert.equal(devlog[0]!.title, "爱可以找到完美时间线");
   assert.equal(devlog[0]!.publishedAt?.toISOString(), "2026-08-20T06:50:46.000Z");
   assert.equal(devlog[0]!.bodyStatus, "ok");
-  assert.equal(devlog[0]!.bodyText, devlog[0]!.title, "an empty blurb uses the title, and is not an unconfirmed body");
   assert.equal(devlog[0]!.excerpt, devlog[0]!.title);
+  assert.match(devlog[0]!.bodyText ?? "", /标签：视频、新官网视频、洲洲整活/);
+  assert.match(devlog[0]!.bodyText ?? "", /发布时间：2026-08-20 14:50:46/);
+  assert.match(devlog[0]!.bodyText ?? "", /时长：212 秒/);
+  assert.doesNotMatch(devlog[0]!.bodyHtml ?? "", /<iframe/);
   assert.ok(devlog[0]!.media?.[0]?.url.startsWith("https://static.gametalk.qq.com/"));
+  const missed = await fetchJsonList(row(videoConfig("df-official-devlog", `${site}/devlog.json`, `${site}/getinfo-fail`)));
+  assert.equal(missed[0]!.bodyStatus, "ok");
+  assert.doesNotMatch(missed[0]!.bodyHtml ?? "", /<video/);
+  assert.match(missed[0]!.bodyText ?? "", /发布时间：2026-08-20 14:50:46/);
+  assert.equal(seen.some((hit) => hit.path.includes("videodetail")), false);
 
   const dated = await fetchJsonList(row(videoConfig("df-official-video-guides", `${site}/undated.json`)));
   assert.deepEqual(dated.map((item) => item.title), [guides[0]!.title, guides[2]!.title]);
@@ -140,6 +172,17 @@ test("游侠网 and 3DM lists keep the page's own time, and a day of 每日密�
   ]);
   assert.notEqual(identityKeyForUrl(dmItems[0]!.url), identityKeyForUrl(dmItems[1]!.url));
   assert.notEqual(dmItems[0]!.publishedAt?.toISOString(), dmItems[1]!.publishedAt?.toISOString());
+});
+
+test("a drm file is not embedded, and a short 3DM page keeps its picture without the app gate", () => {
+  const drm = `QZOutputJson=${JSON.stringify({ vl: { vi: [{ drm: 1, fn: "a.mp4", fvkey: "K", ul: { ui: [{ url: "http://203.0.113.5/vhot2.qqvideo.tc.qq.com/room/" }] } }] } })};`;
+  assert.equal(tencentPlayableMp4(drm), null);
+  const got = readable(read("3dm-357871.html"), "https://ol.3dmgame.com/gl/357871.html");
+  assert.ok(got);
+  assert.match(got.text, /拥有5级穿透水平的穿甲弹/);
+  assert.match(got.html, /1793686895_636286\.png/);
+  assert.doesNotMatch(got.text, /扫一扫下载APP/);
+  assert.ok(got.text.length >= 200, String(got.text.length));
 });
 
 test("grouping instructions keep each day's 每日密码 apart", () => {

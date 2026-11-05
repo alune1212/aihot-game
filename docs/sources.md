@@ -130,6 +130,7 @@
 - `requirePublishedAt: true` 时，没有发布时间的条目不收录，抓取时间不能当成发布时间。条目都映射上了但一条日期都没有，这次抓取失败（`no items with a publication date`），避免悄悄收成空列表。
 - `imagePaths`：封面图字段，按顺序取第一个 http(s) 地址。`//` 开头的补成 https。取到的图记进媒体；同时设了 `summaryIsBody` 时，也放进正文 HTML，文字仍是摘要。
 - `minRequestGapMs`：这个信源访问同一主机的列表和详情至少间隔这么多毫秒（0 到 10000 的整数）。几个信源读同一个接口时共用这段间隔。不设就是不等。
+- `videoVidPath` 与 `videoInfoUrlTemplate` 一起用：条目是腾讯视频（`sVID`）。模板拼出播放器使用的 getinfo 地址，取其中 qqvideo 主机上的 mp4 和 vkey，放进正文的 `<video>`。不放 iframe，播放页也不当正文去抓。getinfo 没有可播放的 mp4 时，正文仍用简介、标签、发布时间和官网播放页。`videoTagPath` 是 `id|名称` 这种逗号分隔的标签字段，`videoDurationPath` 是秒数。vkey 会过期；条目还在列表里时，下次抓取只更新播放地址，不因此重新分析。
 
 ### 本地跑通 HTML/JSON 示例
 

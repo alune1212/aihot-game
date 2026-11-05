@@ -1,5 +1,5 @@
 {
-  "$comment": "《三角洲行动》信源。首次启动导入（scripts/seed.ts），已存在的 id 不会被覆盖，从文件里删掉的也不会从库里删。官方资讯和视频列表来自官网同款公开接口（comm.ams.game.qq.com/ide/，活动 670608 / 流程 1073310，令牌和频道号写在官网脚本 index.js 里）。资讯详情页是脚本渲染的，正文在另一条公开详情接口的 sContent 里（bodyUrlTemplate）；没有文字、只有长图的公告不写入正文。视频频道 typeids=2，播放页按官网 videodetail.html 用 sVID 和 iDocID 拼接，不带频道号、播放次数、标题和时间，同一支视频只留一条。视频没有文字正文时用简介，简介也没有就用标题，并带上封面。Steam 订阅的 description 是公告全文。游侠网、3DM 是网页列表，时间用列表上的北京时间。没有发布时间的条目不收。不配置 Jina。",
+  "$comment": "《三角洲行动》信源。首次启动导入（scripts/seed.ts），已存在的 id 不会被覆盖，从文件里删掉的也不会从库里删。官方资讯和视频列表来自官网同款公开接口（comm.ams.game.qq.com/ide/，活动 670608 / 流程 1073310，令牌和频道号写在官网脚本 index.js 里）。资讯详情页是脚本渲染的，正文在另一条公开详情接口的 sContent 里（bodyUrlTemplate）；没有文字、只有长图的公告不写入正文。视频频道 typeids=2，播放页按官网 videodetail.html 用 sVID 和 iDocID 拼接，不带频道号、播放次数、标题和时间，同一支视频只留一条。视频正文用播放器的 mp4、简介、标签、发布时间和时长；没有更长文案时不编造，也不打开播放页。Steam 订阅的 description 是公告全文。游侠网、3DM 是网页列表，时间用列表上的北京时间。没有发布时间的条目不收。不配置 Jina。",
   "sources": [
     {
       "id": "df-official-notices",
@@ -115,6 +115,10 @@
         "summaryPaths": ["sDesc", "sTitle"],
         "summaryIsBody": true,
         "imagePaths": ["sIMG", "sTvideoHorizontalCover"],
+        "videoVidPath": "sVID",
+        "videoInfoUrlTemplate": "https://vv.video.qq.com/getinfo?vids={raw:sVID}&platform=101001&charge=0&otype=json&defn=shd",
+        "videoTagPath": "sTagInfo",
+        "videoDurationPath": "iTime",
         "authorPaths": ["sAuthor"],
         "publishedAtPath": "sIdxTime",
         "publishedAtUtcOffset": "+08:00",
@@ -146,6 +150,10 @@
         "summaryPaths": ["sDesc", "sTitle"],
         "summaryIsBody": true,
         "imagePaths": ["sIMG", "sTvideoHorizontalCover"],
+        "videoVidPath": "sVID",
+        "videoInfoUrlTemplate": "https://vv.video.qq.com/getinfo?vids={raw:sVID}&platform=101001&charge=0&otype=json&defn=shd",
+        "videoTagPath": "sTagInfo",
+        "videoDurationPath": "iTime",
         "authorPaths": ["sAuthor"],
         "publishedAtPath": "sIdxTime",
         "publishedAtUtcOffset": "+08:00",
@@ -177,6 +185,10 @@
         "summaryPaths": ["sDesc", "sTitle"],
         "summaryIsBody": true,
         "imagePaths": ["sIMG", "sTvideoHorizontalCover"],
+        "videoVidPath": "sVID",
+        "videoInfoUrlTemplate": "https://vv.video.qq.com/getinfo?vids={raw:sVID}&platform=101001&charge=0&otype=json&defn=shd",
+        "videoTagPath": "sTagInfo",
+        "videoDurationPath": "iTime",
         "authorPaths": ["sAuthor"],
         "publishedAtPath": "sIdxTime",
         "publishedAtUtcOffset": "+08:00",
@@ -214,7 +226,7 @@
       "participation_mode": "editorial",
       "interval_minutes": 30,
       "tags": ["攻略"],
-      "site_fulltext": false,
+      "site_fulltext": true,
       "syndicate_fulltext": false
     },
     {
@@ -238,7 +250,7 @@
       "participation_mode": "editorial",
       "interval_minutes": 30,
       "tags": ["攻略"],
-      "site_fulltext": false,
+      "site_fulltext": true,
       "syndicate_fulltext": false
     }
   ]

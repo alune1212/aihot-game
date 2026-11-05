@@ -52,6 +52,49 @@ function httpUrl(value: string): string | null {
   }
 }
 
+/** Tag names from `id|名称,id|名称`. The ids are not shown. */
+function tagNames(raw: string): string[] {
+  const out: string[] = [];
+  for (const part of raw.split(",")) {
+    const name = (part.includes("|") ? part.slice(part.lastIndexOf("|") + 1) : part).trim();
+    if (name && !out.includes(name)) out.push(name);
+  }
+  return out;
+}
+
+function durationSeconds(item: unknown, path: string | undefined): number | null {
+  if (!path) return null;
+  const value = getPath(item, path);
+  const n = typeof value === "number" ? value : typeof value === "string" && /^\d+$/.test(value.trim()) ? Number(value) : NaN;
+  return Number.isFinite(n) && n > 0 ? Math.round(n) : null;
+}
+
+/**
+ * An mp4 the Tencent player would load for this getinfo document (`QZOutputJson=` or raw JSON).
+ * The address is the CDN file plus its vkey. DRM and anything that is not an mp4 on a qqvideo host
+ * are skipped: an iframe player is not a body, and a bare IP URL is not served over https.
+ */
+export function tencentPlayableMp4(payload: string): string | null {
+  const start = payload.indexOf("{");
+  if (start < 0) return null;
+  let data: unknown;
+  try { data = JSON.parse(payload.slice(start).replace(/;\s*$/, "")); } catch { return null; }
+  const vi = (getPath(data, "vl.vi.0") ?? null) as Record<string, unknown> | null;
+  if (!vi || vi.drm) return null;
+  const fn = typeof vi.fn === "string" ? vi.fn : "";
+  const vkey = typeof vi.fvkey === "string" ? vi.fvkey : "";
+  if (!fn.endsWith(".mp4") || !vkey) return null;
+    const bases = getPath(vi, "ul.ui");
+  if (!Array.isArray(bases)) return null;
+  for (const base of bases) {
+    const url = base && typeof base === "object" && "url" in base && typeof base.url === "string" ? base.url : "";
+    const host = /^https?:\/\/[^/]+\/([a-z0-9.-]+\.qqvideo\.tc\.qq\.com\/.*)$/i.exec(url);
+    if (!host) continue;
+    return `https://${host[1]}${fn}?vkey=${encodeURIComponent(vkey)}`;
+  }
+  return null;
+}
+
 function coverImage(item: unknown, paths: string[] | undefined): { kind: "image"; url: string; alt: null } | null {
   for (const path of paths ?? []) {
     const value = getPath(item, path);
@@ -203,6 +246,25 @@ async function jsonDetailBody(c: SourceRow["config"], item: unknown, pageUrl: st
   }
 }
 
+/** The mp4 for a Tencent vid, or null when getinfo has no playable file. One miss does not fail the list. */
+async function tencentPlayUrl(c: SourceRow["config"], item: unknown, headers: Record<string, string>): Promise<string | null> {
+  if (!c.videoVidPath || !c.videoInfoUrlTemplate) return null;
+  const infoUrl = renderTemplate(String(c.videoInfoUrlTemplate), item);
+  if (!infoUrl) return null;
+  try {
+    await paceHost(infoUrl, Number(c.minRequestGapMs) || 0);
+    // Referer is what the player sends. It is not a secret; a cross-origin redirect is still refused.
+    const text = requireOk(await fetchListing(infoUrl, {
+      redirectPolicy: "same-origin",
+      headers: { ...headers, accept: "application/json,text/plain,*/*;q=0.8", referer: "https://v.qq.com/" },
+      timeoutMs: 15_000,
+    })).text();
+    return tencentPlayableMp4(text);
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchJsonList(source: SourceRow): Promise<Candidate[]> {
   const c = source.config;
   const url = String(c.url ?? "");
@@ -255,19 +317,43 @@ export async function fetchJsonList(source: SourceRow): Promise<Candidate[]> {
     // detail document is a different body: it still wins when summaryIsBody is off.
     const summaryIsBody = !c.detail?.bodyUrlSuffix && c.summaryIsBody === true && !!summary;
     const cover = coverImage(item, c.imagePaths);
-    const body = summaryIsBody ? null : await jsonDetailBody(c, item, url, headers);
+    const playUrl = await tencentPlayUrl(c, item, headers);
+    // A video entry's play page is a script player, not an article. getinfo supplies the file; a miss
+    // still keeps the caption and does not open that page.
+    const videoEntry = !!c.videoVidPath;
+    const body = summaryIsBody || videoEntry ? null : await jsonDetailBody(c, item, url, headers);
     // A configured detail document is the body. No words there (or a failed read) is unconfirmed,
     // so a script-rendered article page is not fetched, with or without a reader key.
     // bodyUrlSuffix still needs that fetch, so it stays pending instead of unconfirmed.
-    const detailConfigured = !summaryIsBody && !c.detail?.bodyUrlSuffix && !!(c.bodyUrlTemplate && c.bodyPath);
+    const detailConfigured = !summaryIsBody && !videoEntry && !c.detail?.bodyUrlSuffix && !!(c.bodyUrlTemplate && c.bodyPath);
     let bodyHtml = body?.html ?? null;
     let bodyText = summaryIsBody ? stripTags(summary!) : body?.text ?? null;
     // summaryIsBody is the article. A cover sits in that HTML so the page can show it; the text stays the summary.
-    if (summaryIsBody && summary) {
+    if (summaryIsBody && summary && !c.videoVidPath) {
       const img = cover ? `<p><img src="${escapeXml(cover.url)}" alt=""></p>` : "";
       bodyHtml = sanitizeBody(`${img}<p>${escapeXml(summary)}</p>`, url);
       bodyText = collapseWhitespace(stripTags(bodyHtml)) || stripTags(summary);
     }
+    if (c.videoVidPath) {
+      const tags = typeof c.videoTagPath === "string" ? tagNames(firstString(item, [c.videoTagPath]) ?? "") : [];
+      const seconds = durationSeconds(item, typeof c.videoDurationPath === "string" ? c.videoDurationPath : undefined);
+      const publishedRaw = c.publishedAtPath ? getPath(item, c.publishedAtPath) : null;
+      const when = typeof publishedRaw === "string" ? publishedRaw.trim() : "";
+      const blocks: string[] = [];
+      if (playUrl) {
+        const src = escapeXml(playUrl);
+        const poster = cover ? ` poster="${escapeXml(cover.url)}"` : "";
+        blocks.push(`<video src="${src}"${poster}><source src="${src}" type="video/mp4"></video>`);
+      } else if (cover) blocks.push(`<p><img src="${escapeXml(cover.url)}" alt=""></p>`);
+      if (summary && summary !== title) blocks.push(`<p>${escapeXml(summary)}</p>`);
+      if (tags.length) blocks.push(`<p>标签：${escapeXml(tags.join("、"))}</p>`);
+      if (when) blocks.push(`<p>发布时间：${escapeXml(when)}</p>`);
+      if (seconds) blocks.push(`<p>时长：${seconds} 秒</p>`);
+      blocks.push(`<p><a href="${escapeXml(url)}">官网播放页</a></p>`);
+      bodyHtml = sanitizeBody(blocks.join(""), url);
+      bodyText = collapseWhitespace(stripTags(bodyHtml));
+    }
+    const video = playUrl ? { kind: "video" as const, url: playUrl, poster: cover?.url ?? null } : null;
     out.push({
       url,
       title: collapseWhitespace(stripTags(title)),
@@ -276,8 +362,8 @@ export async function fetchJsonList(source: SourceRow): Promise<Candidate[]> {
       excerpt: summary ? collapseWhitespace(stripTags(summary)).slice(0, 2000) : null,
       bodyHtml,
       bodyText,
-      bodyStatus: summaryIsBody || body ? "ok" : detailConfigured ? "unconfirmed" : "pending",
-      ...(cover ? { media: [cover] } : {}),
+      bodyStatus: summaryIsBody || body || (c.videoVidPath && bodyText) ? "ok" : detailConfigured ? "unconfirmed" : "pending",
+      ...(cover || video ? { media: [...(cover ? [cover] : []), ...(video ? [video] : [])] } : {}),
       raw: { externalId: externalId ?? null },
     });
   }
