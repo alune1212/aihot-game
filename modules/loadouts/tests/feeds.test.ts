@@ -442,11 +442,11 @@ test("official hot codes sort ahead of streamers, and a repeated code stays with
   assert.equal(codes[0]?.priceText, "61万");
   assert.equal(codes[0]?.popularityText, "应用 86.4万");
   assert.equal(codes[0]?.featured, false);
-  assert.deepEqual(codes[0]?.sources.map((item) => item.label), ["官方热门", "云码库"]);
+  assert.deepEqual(codes[0]?.sources.map((item) => item.label), ["官方热门"]);
   assert.equal(codes[1]?.source, "官方热门");
   assert.equal(codes[1]?.author, "官方作者");
   assert.equal(codes[1]?.popularityText, "应用 10万");
-  assert.deepEqual(codes[1]?.sources.map((item) => item.label), ["官方热门", "云码库"]);
+  assert.deepEqual(codes[1]?.sources.map((item) => item.label), ["官方热门"]);
   assert.equal(codes[2]?.popularityText, "应用 50");
   assert.equal(codes[3]?.featured, true);
   assert.equal(codes[3]?.source, "洲械库");

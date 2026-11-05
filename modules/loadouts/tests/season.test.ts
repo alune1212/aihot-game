@@ -2,8 +2,8 @@
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
 import { closeDb, sql } from "@aihot/backend/db";
-import { beijingMidnight } from "@aihot/contracts/time";
-import { planCleanup, cleanupOutOfSeason } from "../cleanup.ts";
+import { beijingDate } from "@aihot/contracts/time";
+import { planCleanup, cleanupOutOfSeason, recentFetchFailed } from "../cleanup.ts";
 import { decodeLoadoutCode } from "../decode.ts";
 import { decideLoadout } from "../codes.ts";
 import { dropBareYunmaku, listLoadouts, saveFeedLoadout } from "../store.ts";
@@ -65,61 +65,86 @@ test("a stored announcement becomes the current season only after its start date
   assert.equal(again.current.name, "微光");
 });
 
-test("cleanup refuses an uncertain season, a failed fetch, and a thin new season", () => {
-  const codes = [{ id: 1, source: "nss", sources: ["nss"], postedOn: "2026-08-01", fetchedOn: "2026-08-01", onOfficialList: null }];
-  const base = { seasonStart: "2026-11-05", dryRun: false, max: 10, minFresh: 2, fresh: 5, listKnown: true, codes };
+test("cleanup deletes pre-season and undated codes, including official ones, even when the new season is empty", () => {
+  const oldOfficial = { id: 2, source: "ams-list", sources: ["ams-list"], postedOn: "2026-09-10" };
+  const undated = { id: 3, source: "nss", sources: ["nss"], postedOn: null };
+  const current = { id: 4, source: "yufan", sources: ["yufan"], postedOn: "2026-11-05" };
+  const base = { seasonStart: "2026-11-05", dryRun: false, codes: [oldOfficial, undated, current] };
   assert.match(planCleanup({ ...base, seasonCertain: false, fetchFailed: false }).skipped ?? "", /没有确认/);
   assert.match(planCleanup({ ...base, seasonCertain: true, fetchFailed: true }).skipped ?? "", /抓取失败/);
-  assert.match(planCleanup({ ...base, seasonCertain: true, fetchFailed: false, fresh: 1 }).skipped ?? "", /少于/);
-  const plan = planCleanup({ ...base, seasonCertain: true, fetchFailed: false });
-  assert.deepEqual(plan.ids, [1]);
+  const plan = planCleanup({ ...base, seasonCertain: true, fetchFailed: false, dryRun: true });
+  assert.deepEqual(plan.ids, [2, 3]);
+  assert.equal(plan.bySource["ams-list"], 1);
   assert.equal(plan.bySource.nss, 1);
-});
-
-test("official codes still on the list stay, absent ones from the previous season go", () => {
-  const kept = { id: 2, source: "ams-list", sources: ["ams-list"], postedOn: "2026-09-10", fetchedOn: "2026-09-10", onOfficialList: true as const };
-  const gone = { id: 3, source: "ams-list", sources: ["ams-list"], postedOn: null, fetchedOn: "2026-10-01", onOfficialList: false as const };
-  const rotated = { id: 4, source: "yufan", sources: ["yufan"], postedOn: null, fetchedOn: "2026-11-06", onOfficialList: false as const };
-  const plan = planCleanup({
-    seasonCertain: true, seasonStart: "2026-11-05", fetchFailed: false, dryRun: true, max: 10, minFresh: 1, fresh: 3, listKnown: true,
-    codes: [kept, gone, rotated],
-  });
-  assert.deepEqual(plan.ids, [3]);
   assert.equal(plan.dryRun, true);
 });
 
-test("a certain season deletes the previous season's community code and leaves the new one", async () => {
+test("a feed that never succeeded, is blocked by robots, or is turned off does not stop cleanup", () => {
+  const now = new Date("2026-11-05T06:10:00+08:00");
+  const recent = new Date("2026-11-05T05:00:00+08:00");
+  const env = { COLLECT_ENABLED: "true", LOADOUT_AMS_ENABLED: "true", LOADOUT_NSS_ENABLED: "true" };
+  const feed = (over: { id?: string; last_fetch_at?: Date; last_ok_at?: Date | null; last_error?: string | null; health?: string }) => ({
+    id: "nss",
+    health: "degraded",
+    last_fetch_at: recent,
+    last_ok_at: new Date("2026-11-04T01:00:00+08:00") as Date | null,
+    last_error: "HTTP 503" as string | null,
+    ...over,
+  });
+  assert.equal(recentFetchFailed([feed({ id: "deltacode", last_ok_at: null, last_error: "robots.txt HTTP 403" })], now, env), false);
+  assert.equal(recentFetchFailed([feed({ last_ok_at: null })], now, env), false);
+  assert.equal(recentFetchFailed([feed({ last_error: "robots.txt HTTP 403" })], now, env), false);
+  assert.equal(recentFetchFailed([feed({})], now, { COLLECT_ENABLED: "true" }), false);
+  assert.equal(recentFetchFailed([feed({ id: "ams-price" })], now, env), false);
+  assert.equal(recentFetchFailed([feed({ last_fetch_at: new Date("2026-11-04T00:00:00+08:00") })], now, env), false);
+  assert.equal(recentFetchFailed([feed({ health: "ok", last_error: null })], now, env), false);
+  assert.equal(recentFetchFailed([feed({})], now, env), true);
+});
+
+test("a certain season deletes old and undated codes, and a later sighting keeps a code seen again", async () => {
   await sql`INSERT INTO loadout_seasons (name, number, starts_on, source, confidence, evidence)
     VALUES ('测试季', NULL, '2026-11-05', 'announcement', 'certain', 'fixture')`;
   const fresh = "K416突击步枪-烽火地带-6SEASONFRESH1234567";
   const old = "M4A1突击步枪-烽火地带-6SEASONOLDCODE12345";
+  const seenAgain = "Vector冲锋枪-全面战场-6SEENAGAIN12345678";
   const at = new Date("2026-11-06T01:00:00Z");
-  for (let i = 0; i < 40; i++) {
-    await saveFeedLoadout(sql, "nss", {
-      categoryKey: "rifle", weapon: "K416突击步枪", code: `K416突击步枪-烽火地带-6FRESH${String(i).padStart(8, "0")}XX`,
-      mode: "烽火地带", priceText: null, author: "甲", sourceUrl: "https://nss.example/gun", postedOn: "2026-11-06", popularity: 1,
-    }, at);
-  }
   await saveFeedLoadout(sql, "nss", {
     categoryKey: "rifle", weapon: "K416突击步枪", code: fresh, mode: "烽火地带", priceText: null, author: "甲",
     sourceUrl: "https://nss.example/gun", postedOn: "2026-11-06", popularity: 2,
-  }, at);
+  }, at, "2026-11-05");
   await saveFeedLoadout(sql, "sjzgq", {
     categoryKey: "rifle", weapon: "M4A1突击步枪", code: old, mode: "烽火地带", priceText: null, author: "乙",
     sourceUrl: "https://sjzgq.example/", postedOn: "2026-08-01", popularity: null,
   }, at);
-  await sql`UPDATE loadout_codes SET noted_at = ${beijingMidnight("2026-08-01")} WHERE code = ${old}`;
-  const dry = await cleanupOutOfSeason({ db: sql, now: new Date("2026-11-06T04:00:00Z"), env: { LOADOUT_CLEANUP_DRY_RUN: "true", LOADOUT_CLEANUP_MIN_FRESH: "40" } });
+  await saveFeedLoadout(sql, "nss", {
+    categoryKey: "smg", weapon: "Vector冲锋枪", code: seenAgain, mode: "全面战场", priceText: null, author: "丙",
+    sourceUrl: "https://nss.example/gun", postedOn: null, popularity: null,
+  }, new Date("2026-10-02T01:00:00Z"));
+  await saveFeedLoadout(sql, "yunmaku", {
+    categoryKey: "smg", weapon: "Vector冲锋枪", code: seenAgain, mode: "全面战场", priceText: null, author: "丙",
+    sourceUrl: "https://www.yunmaku.com/loadouts", postedOn: null, popularity: null,
+  }, at, "2026-11-05");
+  const [restamped] = await sql<{ noted_at: Date }[]>`SELECT noted_at FROM loadout_codes WHERE code = ${seenAgain}`;
+  assert.equal(restamped ? beijingDate(restamped.noted_at) : null, "2026-11-06");
+  assert.equal(await saveFeedLoadout(sql, "sjzgq", {
+    categoryKey: "rifle", weapon: "M4A1突击步枪", code: old, mode: "烽火地带", priceText: null, author: "乙",
+    sourceUrl: "https://sjzgq.example/", postedOn: "2026-08-01", popularity: null,
+  }, at, "2026-11-05"), "kept");
+  const dry = await cleanupOutOfSeason({ db: sql, now: new Date("2026-11-06T04:00:00Z"), dryRun: true });
   assert.equal(dry.deleted, 0);
-  assert.ok(dry.ids.length >= 1);
-  const [still] = await sql`SELECT id FROM loadout_codes WHERE code = ${old}`;
+  const [still] = await sql<{ id: number }[]>`SELECT id FROM loadout_codes WHERE code = ${old}`;
   assert.ok(still);
-  const live = await cleanupOutOfSeason({ db: sql, now: new Date("2026-11-06T04:00:00Z"), env: { LOADOUT_CLEANUP_DRY_RUN: "false", LOADOUT_CLEANUP_MIN_FRESH: "40", LOADOUT_CLEANUP_MAX: "400" } });
+  assert.equal(dry.ids.includes(Number(still.id)), true);
+  const [freshRow] = await sql<{ id: number }[]>`SELECT id FROM loadout_codes WHERE code = ${fresh}`;
+  assert.equal(dry.ids.includes(Number(freshRow?.id)), false);
+  const live = await cleanupOutOfSeason({ db: sql, now: new Date("2026-11-06T04:00:00Z"), dryRun: false });
   assert.equal(live.deleted >= 1, true);
   const [gone] = await sql`SELECT id FROM loadout_codes WHERE code = ${old}`;
   assert.equal(gone, undefined);
-  const [kept] = await sql`SELECT id FROM loadout_codes WHERE code = ${fresh}`;
-  assert.ok(kept);
+  const [keptFresh] = await sql`SELECT id FROM loadout_codes WHERE code = ${fresh}`;
+  const [keptSeen] = await sql`SELECT id FROM loadout_codes WHERE code = ${seenAgain}`;
+  assert.ok(keptFresh);
+  assert.ok(keptSeen);
 });
 
 test("authorless yunmaku with no other source and no official detail ranks last and is dropped", async () => {

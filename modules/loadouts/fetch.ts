@@ -217,7 +217,7 @@ export async function fetchLoadoutFeeds(deps: { fetch?: PageFetch; sleep?: (ms: 
       const fetchedAt = now();
       const counts = { inserted: 0, updated: 0, kept: 0, staleNoted: 0 };
       for (const row of gathered.rows) {
-        const result = await saveFeedLoadout(sql, source.id, row, fetchedAt);
+        const result = await saveFeedLoadout(sql, source.id, row, fetchedAt, startsOn);
         counts[result] += 1;
       }
       counts.staleNoted = await noteStaleLoadouts(sql, source.id, gathered.stale);

@@ -4,7 +4,7 @@ import { defineServerModule } from "@aihot/backend/modules";
 import { GAME_ID, GAME_NAME, isWeaponListed, WEAPON_CATEGORIES } from "./catalog.ts";
 import { loadoutDetail, priceLoadoutList, syncLoadoutDetails, syncLoadoutPrices } from "./detail.ts";
 import { costsForLoadouts, loadoutCost, partialCoverage, syncMarketPrices } from "./prices.ts";
-import { fetchAmsCodes, fetchDeltaCodes, fetchNssCodes, fetchWeaponTiers, fetchWeaponTtk } from "./ingest.ts";
+import { fetchAmsCodes, fetchNssCodes, fetchWeaponTiers, fetchWeaponTtk } from "./ingest.ts";
 import { fetchLoadoutFeeds } from "./fetch.ts";
 import { cleanupOutOfSeason } from "./cleanup.ts";
 import { BALANCE_SEASON_NOTE, feedEnabled } from "./feeds.ts";
@@ -18,9 +18,9 @@ import { verifyLoadouts } from "./verify.ts";
 function seasonNote(season: StoredSeason): string {
   const label = seasonLabel(season);
   const seasonLine = season.confidence === "certain"
-    ? `当前赛季 ${label}，${season.startsOn} 起。更早的码会删掉，不留在这页。`
+    ? `当前赛季 ${label}，${season.startsOn} 起。更早的码，以及没有发布日期的码，会删掉，不留在这页。`
     : `赛季还没从官方公告确认，暂按 ${label}（${season.startsOn}）。没确认之前不会换季，也不会删码。`;
-  return `来自官方热门、鸟兽兽、国服配装、云码库、洲械库，以及写明了枪名的文章。${seasonLine}点进一条可以看配件、最新价格和属性。对不上官方列表的社区码会标「待验证」。枪卡上的梯队和理论 TTK 是社区补充。${BALANCE_SEASON_NOTE} 价格以游戏内交易行为准。导入前请回游戏里核对。`;
+  return `来自官方热门、鸟兽兽、云码库、洲械库，以及写明了枪名的文章。${seasonLine}点进一条可以看配件、最新价格和属性。对不上官方列表的社区码会标「待验证」。枪卡上的梯队和理论 TTK 是社区补充。${BALANCE_SEASON_NOTE} 价格以游戏内交易行为准。导入前请回游戏里核对。`;
 }
 
 export default defineServerModule({
@@ -164,13 +164,6 @@ export default defineServerModule({
       missed: "skip",
       when: () => feedEnabled("LOADOUT_NSS_ENABLED"),
       run: () => fetchNssCodes(),
-    },
-    {
-      name: "loadouts.fetch.deltacode",
-      cron: "25 */12 * * *",
-      missed: "skip",
-      when: () => feedEnabled("LOADOUT_DELTACODE_ENABLED"),
-      run: () => fetchDeltaCodes(),
     },
     {
       name: "loadouts.fetch.ttk",

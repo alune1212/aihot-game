@@ -23,13 +23,10 @@ export const OFFICIAL_FEED_ID = "yufan";
 /** 官方改枪台方案列表。读者看到的名字和有力气一样，都是「官方热门」。 */
 export const AMS_FEED_ID = "ams-list";
 export const NSS_FEED_ID = "nss";
-export const DELTACODE_FEED_ID = "deltacode";
 export const DFTTK_FEED_ID = "dfttk";
 export const TIER_FEED_ID = "congcong";
 
 export const NSS_ORIGIN = "https://nss.seoml.com";
-export const DELTACODE_ORIGIN = "https://delta-code.cn";
-export const DELTACODE_PAGE = `${DELTACODE_ORIGIN}/loadouts`;
 export const DFTTK_ORIGIN = "https://dfttk.com";
 export const DFTTK_MANIFEST = `${DFTTK_ORIGIN}/data/v3/manifest.json`;
 export const TIER_PAGE = "https://www.dfgqm.com/tier-list";
@@ -79,7 +76,6 @@ export const YUNMAKU_MODES = ["fenghuo", "battlefield", "heichao"] as const;
 const SOURCE_RANK: Record<string, number> = {
   [AMS_FEED_ID]: 0,
   [OFFICIAL_FEED_ID]: 1,
-  [DELTACODE_FEED_ID]: 2,
   [NSS_FEED_ID]: 3,
   yunmaku: 4,
   sjzgq: 5,
@@ -91,7 +87,6 @@ export const FEED_LABEL: Record<string, string> = {
   [OFFICIAL_FEED_ID]: "官方热门",
   [AMS_FEED_ID]: "官方热门",
   [NSS_FEED_ID]: "鸟兽兽",
-  [DELTACODE_FEED_ID]: "国服配装",
 };
 
 export function isOfficialSource(source: string | null | undefined): boolean {
@@ -127,13 +122,14 @@ export function publicFeed(source: string | null, sourceUrl: string | null): { s
   return { source: FEED_LABEL[source] ?? source, sourceUrl };
 }
 
-/** 主来源排在最前。两个官方来源合并成一个「官方热门」。 */
+/** 主来源排在最前。两个官方来源合并成一个「官方热门」。已经有官方来源时不再列社区来源。 */
 export function presentSources(
   primary: string | null,
   primaryUrl: string | null,
   rows: readonly { source: string; sourceUrl: string | null }[],
 ): ShownSource[] {
-  const list = rows.length ? [...rows] : (primary ? [{ source: primary, sourceUrl: primaryUrl }] : []);
+  const all = rows.length ? [...rows] : (primary ? [{ source: primary, sourceUrl: primaryUrl }] : []);
+  const list = all.some((row) => isOfficialSource(row.source)) ? all.filter((row) => isOfficialSource(row.source)) : all;
   list.sort((a, b) => {
     if (a.source === primary && b.source !== primary) return -1;
     if (b.source === primary && a.source !== primary) return 1;

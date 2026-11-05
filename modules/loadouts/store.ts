@@ -106,14 +106,22 @@ async function rememberSource(db: Db, loadoutId: number | string, source: string
     ON CONFLICT (loadout_id, source) DO UPDATE SET source_url = EXCLUDED.source_url, seen_at = now()`;
 }
 
-/** 写入一条聚合站的码。官方可以盖过社区来源；社区之间先到先得。每个来过的站都记在 loadout_code_sources。 */
-export async function saveFeedLoadout(db: Db, source: string, row: FeedRow, fetchedAt: Date): Promise<"inserted" | "updated" | "kept"> {
+/**
+ * 写入一条聚合站的码。官方可以盖过社区来源；社区之间先到先得。每个来过的站都记在 loadout_code_sources。
+ * 来源没给日期时，用这次抓取时间。开季前的空日期或更早的日期，在这季又见到时改成这次的日期，避免被当成无日期删掉。
+ * 带开季前日期的码到不了这里（decideLoadout 已拒绝），所以旧日期不会被写回来。
+ */
+export async function saveFeedLoadout(db: Db, source: string, row: FeedRow, fetchedAt: Date, seasonStart?: string): Promise<"inserted" | "updated" | "kept"> {
+  const seasonAt = seasonStart ? beijingMidnight(seasonStart) : null;
+  // 来源仍挂着开季前的日期时不写回：不新建，也不把已经标成本季的码改回旧日期。
+  if (row.postedOn && seasonAt && row.postedOn < seasonStart!) return "kept";
   const noted = postedAt(row.postedOn);
+  const stamp = noted ?? fetchedAt;
   const popularity = row.popularity ?? null;
   const likes = row.likes ?? null;
   const inserted = await db<{ id: number }[]>`INSERT INTO loadout_codes
     (game_id, category_key, weapon, code, mode, price_text, author, popularity, likes, source, source_url, noted_at, fetched_at)
-    VALUES (${GAME_ID}, ${row.categoryKey}, ${row.weapon}, ${row.code}, ${row.mode}, ${row.priceText}, ${row.author}, ${popularity}, ${likes}, ${source}, ${row.sourceUrl}, ${noted}, ${fetchedAt})
+    VALUES (${GAME_ID}, ${row.categoryKey}, ${row.weapon}, ${row.code}, ${row.mode}, ${row.priceText}, ${row.author}, ${popularity}, ${likes}, ${source}, ${row.sourceUrl}, ${stamp}, ${fetchedAt})
     ON CONFLICT (game_id, code) DO NOTHING RETURNING id`;
   if (inserted.length) {
     await rememberSource(db, inserted[0]!.id, source, row.sourceUrl);
@@ -123,7 +131,13 @@ export async function saveFeedLoadout(db: Db, source: string, row: FeedRow, fetc
     SELECT id, source FROM loadout_codes WHERE game_id = ${GAME_ID} AND code = ${row.code}`;
   if (!existing) return "kept";
   await rememberSource(db, existing.id, source, row.sourceUrl);
-  if (!sourceOutranks(source, existing.source)) return "kept";
+  if (!sourceOutranks(source, existing.source)) {
+    if (seasonAt) {
+      await db`UPDATE loadout_codes SET noted_at = ${stamp}
+        WHERE id = ${existing.id} AND (noted_at IS NULL OR noted_at < ${seasonAt})`;
+    }
+    return "kept";
+  }
   await db`UPDATE loadout_codes SET
     category_key = ${row.categoryKey},
     weapon = ${row.weapon},
@@ -134,7 +148,12 @@ export async function saveFeedLoadout(db: Db, source: string, row: FeedRow, fetc
     likes = COALESCE(${likes}, likes),
     source = ${source},
     source_url = ${row.sourceUrl},
-    noted_at = COALESCE(${noted}, noted_at),
+    noted_at = CASE
+      WHEN ${noted}::timestamptz IS NOT NULL THEN ${noted}
+      WHEN loadout_codes.noted_at IS NULL THEN ${fetchedAt}
+      WHEN ${seasonAt}::timestamptz IS NOT NULL AND loadout_codes.noted_at < ${seasonAt}::timestamptz THEN ${fetchedAt}
+      ELSE loadout_codes.noted_at
+    END,
     fetched_at = ${fetchedAt},
     article_id = NULL
     WHERE id = ${existing.id}`;

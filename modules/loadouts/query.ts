@@ -3,7 +3,7 @@
 
 export const LOADOUT_PER_WEAPON = 40;
 export const LOADOUT_MODES = ["烽火地带", "全面战场", "黑潮爆破"] as const;
-export const LOADOUT_SOURCES = ["官方热门", "鸟兽兽", "国服配装", "云码库", "洲械库"] as const;
+export const LOADOUT_SOURCES = ["官方热门", "鸟兽兽", "云码库", "洲械库"] as const;
 export const LOADOUT_SORTS = ["popularity", "newest", "price", "tier"] as const;
 
 export type LoadoutSort = (typeof LOADOUT_SORTS)[number];

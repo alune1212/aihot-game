@@ -6,9 +6,8 @@ import { closeDb, sql } from "@aihot/backend/db";
 import { parseSolutionCodes, readAms } from "../ams.ts";
 import { presentBalance } from "../balance.ts";
 import { decideLoadout } from "../codes.ts";
-import { DELTACODE_PAGE, DFTTK_MANIFEST, NSS_ORIGIN, TIER_PAGE, feedEnabled, nssGunUrl, sourceOutranks } from "../feeds.ts";
-import { fetchAmsCodes, fetchDeltaCodes, fetchNssCodes, fetchWeaponTiers, fetchWeaponTtk, gatherAms, gatherDeltaCode, gatherNss, gatherTier, gatherTtk, type PageFetch } from "../ingest.ts";
-import { parseDeltaCode } from "../parse-deltacode.ts";
+import { DFTTK_MANIFEST, NSS_ORIGIN, TIER_PAGE, feedEnabled, nssGunUrl, sourceOutranks } from "../feeds.ts";
+import { fetchAmsCodes, fetchNssCodes, fetchWeaponTiers, fetchWeaponTtk, gatherAms, gatherNss, gatherTier, gatherTtk, type PageFetch } from "../ingest.ts";
 import { absoluteDfttk, parseDfttkNames, parseDfttkPlan, parseDfttkPreview, parseDfttkRanking, parseRankingIndex, ttkAt } from "../parse-dfttk.ts";
 import { nssLastPage, parseNss } from "../parse-nss.ts";
 import { parseTierList } from "../parse-tier.ts";
@@ -100,39 +99,6 @@ test("nss html keeps the full code and author, and a 403 stops later pages", asy
   assert.match(gathered.warning ?? "", /403/);
   assert.equal(seen.includes(nssGunUrl(3)), false);
   assert.equal(seen.filter((url) => url.startsWith(NSS_ORIGIN) && !url.endsWith("robots.txt")).length, 2);
-});
-
-test("delta-code keeps streamer codes from the public payload and a 403 does not throw", async () => {
-  const html = fixture("deltacode.html");
-  const raws = parseDeltaCode(html);
-  assert.equal(raws.length, 4);
-  const live = raws.find((item) => item.code.includes("6DELTACODE"));
-  assert.equal(live?.author, "昊天");
-  assert.equal(live?.priceText, "21.1万");
-  assert.equal(live?.popularity, 1054);
-  assert.equal(live?.postedOn, "2026-10-02");
-  assert.equal(live?.sourceUrl, "https://delta-code.cn/build/k416-haotian");
-  const decisions = raws.map((item) => decideLoadout(item));
-  assert.equal(decisions.filter((item) => item.ok).length, 1);
-  assert.equal(decisions.filter((item) => !item.ok && item.reason === "stale").length, 1);
-  assert.equal(decisions.filter((item) => !item.ok && item.reason === "shape").length, 2);
-  const robots = fixture("deltacode-robots.txt");
-  const gathered = await gatherDeltaCode(async (url) => {
-    if (url.endsWith("/robots.txt")) return { status: 200, text: () => robots };
-    assert.equal(url, DELTACODE_PAGE);
-    return { status: 200, text: () => html };
-  }, async () => {});
-  assert.equal(gathered.rows.length, 1);
-  assert.equal(gathered.stale.length, 1);
-  const blocked = await fetchDeltaCodes({
-    fetch: async (url) => {
-      if (url.endsWith("/robots.txt")) return { status: 200, text: () => robots };
-      return { status: 403, text: () => "Forbidden" };
-    },
-    sleep: async () => {},
-  });
-  assert.equal(blocked.ok, false);
-  assert.match(String(blocked.error), /403/);
 });
 
 test("dfttk ranking uses the base build at the default range and skips unknown guns", () => {
