@@ -68,6 +68,7 @@ const CHECKS: Check[] = [
   moduleAlerts,
   // Follow-ups
   sourceFollowUps,
+  baiduPushFailing,
   unknownOutcomes,
   agentTransportFindings,
   waitingQueues,
@@ -104,6 +105,7 @@ async function contentCollection(now: number, open: AlertState): Promise<Finding
     impact: last?.at ? `读者看不到新文章：最后一篇收录于 ${beijingStamp(last.at)}` : "读者看不到新文章：一天内没有收录任何文章",
     heals: ALERTS.usualFlow ? `没有，${ALERTS.usualFlow}` : "没有",
     action: "把这条发给 AI 排查处理",
+    agentFirst: true,
     detail: quietFor <= QUIET_FETCHING_MINUTES * 60_000
       ? `editorial articles.discovered_at 超过 ${QUIET_MINUTES} 分钟没有新值，期间没有一次成功的 editorial fetch_runs（热度信号单独评估）；查 worker、sources.schedule、出网代理与采集失败`
       : `editorial articles.discovered_at 超过 ${QUIET_FETCHING_MINUTES} 分钟没有新值（采集仍成功也算）；查采集结果为何一直是 new_count=0：解析、去重与入库`,
@@ -206,7 +208,7 @@ async function contentProcessing(now: number, open: AlertState): Promise<Finding
   }];
 }
 
-// Content-group pushes the Feishu webhook refused (a removed bot, a changed address); nothing resends them.
+// Content-group pushes the group's webhook refused (a removed bot, a changed address); nothing resends them.
 async function refusedDeliveries(now: number, open: AlertState): Promise<Finding[]> {
   const incident = open["deliveries.failed"];
   const since = new Date((incident ? Date.parse(incident.since) : now) - 86400_000);
@@ -220,7 +222,7 @@ async function refusedDeliveries(now: number, open: AlertState): Promise<Finding
   return [{
     key: "deliveries.failed",
     level: "today",
-    title: "飞书内容群有推送没发出去",
+    title: `${refused!.target ?? "内容群"}有推送没发出去`,
     impact: `${refused!.n} 条通知尚未确认送达${refused!.target ?? "内容群"}`,
     heals: "不会自动重发",
     action: "转给 AI 处理；如果推送机器人被移出了群，需要你把它加回去",
@@ -258,6 +260,27 @@ async function backupAge(now: number): Promise<Finding[]> {
   return [];
 }
 
+/**
+ * Baidu's push (operations/baidu-push.ts) failing for a whole day: a revoked token or a site that lost its
+ * verification does not heal, while Baidu answering "please retry later" for an hour does. Readers see
+ * nothing; new pages reach Baidu later, so it is a follow-up.
+ */
+async function baiduPushFailing(now: number): Promise<Finding[]> {
+  const [r] = await sql<{ since: Date | null; error: string | null }[]>`
+    WITH last_ok AS (SELECT max(started_at) AS at FROM job_runs WHERE job = 'seo.baidu-push' AND status = 'ok')
+    SELECT min(f.started_at) AS since, (array_agg(f.error ORDER BY f.started_at DESC))[1] AS error
+    FROM job_runs f, last_ok
+    WHERE f.job = 'seo.baidu-push' AND f.status = 'failed' AND f.started_at > coalesce(last_ok.at, '-infinity') AND f.started_at <= ${new Date(now)}`;
+  if (!r?.since || now - r.since.getTime() < DAY_MS) return [];
+  return [{
+    key: "seo.baidu-push",
+    level: "later",
+    title: "百度主动推送一天没成功",
+    detail: `从 ${beijingStamp(r.since)} 起 seo.baidu-push 一直失败，最近一次：${(r.error ?? "").slice(0, 200)}；401 是令牌失效（百度搜索资源平台 · 普通收录 · API提交 重新取，写进生产 backend.env 的 BAIDU_PUSH_TOKEN），400 site error 是站点掉了验证（首页的 baidu-site-verification 标签）`,
+    since: r.since,
+  }];
+}
+
 /** What the site's modules find. */
 async function moduleAlerts(now: number): Promise<Finding[]> {
   const out: Finding[] = [];
@@ -281,14 +304,15 @@ async function sourceFollowUps(now: number): Promise<Finding[]> {
 async function unknownOutcomes(): Promise<Finding[]> {
   const out: Finding[] = [];
 
-  const [r] = await sql<{ receipts: number; services: string | null; deliveries: number }[]>`
+  const [r] = await sql<{ receipts: number; services: string | null; deliveries: number; targets: string | null }[]>`
     SELECT (SELECT count(*)::int FROM receipts WHERE ${awaitingRelease()}) AS receipts,
            (SELECT string_agg(DISTINCT service || '/' || purpose, '、') FROM receipts WHERE ${awaitingRelease()}) AS services,
-           (SELECT count(*)::int FROM deliveries WHERE status = 'unknown') AS deliveries`;
+           (SELECT count(*)::int FROM deliveries WHERE status = 'unknown') AS deliveries,
+           (SELECT string_agg(DISTINCT t.note, '、') FROM deliveries d JOIN notify_targets t ON t.key = d.target_key WHERE d.status = 'unknown') AS targets`;
   if (r!.receipts > 0) {
     out.push({ key: "receipts.unknown", level: "later", title: `${r!.receipts} 个付费请求的结果尚未确认`, detail: `${r!.services}；仍挡住内容发布的请求需核对计费或按已有授权放行` });
   }
-  if (r!.deliveries > 0) out.push({ key: "deliveries.unknown", level: "later", title: `${r!.deliveries} 条飞书内容群推送不确定是否送达`, detail: "核对飞书内容群里有没有发出，再标记或补发" });
+  if (r!.deliveries > 0) out.push({ key: "deliveries.unknown", level: "later", title: `${r!.deliveries} 条内容群推送不确定是否送达`, detail: `核对${r!.targets ?? "内容群"}里有没有发出，再标记或补发` });
   return out;
 }
 
@@ -548,7 +572,7 @@ export async function checkAlerts(now = Date.now()) {
     // Claim AI was notified only after the hub actually accepts this incident's wake; persist the occurrence
     // timestamp first so a failed owner send or crash after waking cannot mint a second incident ID on retry.
     let woken = false;
-    if (handing && f.key !== "webhook.transport" && f.owner !== "only" && f.action === "把这条发给 AI 排查处理") {
+    if (handing && f.agentFirst) {
       if (!open) {
         const entry = { title: f.title, since: since.toISOString() };
         state[f.key] = entry;
