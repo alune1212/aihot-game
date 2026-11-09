@@ -8,6 +8,7 @@
 // - a technical-direction topic stops taking its tags;
 // - withdrawn or not yet released articles appear in a list or a count;
 // - an article or story page names a topic its reports do not belong to;
+// - an article page cannot tell which of its tags are a topic's own, so they link to filtered lists;
 // - a topic without content has no page, or an unknown slug or a page past the end has one.
 import { tag } from "./setup.ts";
 import assert from "node:assert/strict";
@@ -122,6 +123,18 @@ test("a company topic takes the articles about it, not the ones that only mentio
   assert.deepEqual(await topicsOf(subpoena), ["timi", "versions"]);
   assert.deepEqual(await topicsOf(pact), ["versions"]);
   assert.deepEqual(await topicsOf(agent), ["operations", "versions"]);
+});
+
+test("an article page says which of its tags are a topic's own", async () => {
+  // A direction's or a form's tags, and the tag cards show for a company (its subject tag is never shown).
+  // 地图撤离 and 攻略教学 stay unused: later tests expect the maps page empty and guides to hold one article.
+  const id = await report({ at: hoursAgo(3), title: `天美公布全面战场公告 ${T}`, subjects: ["timi", "delta-force"], tags: ["全面战场", "官方公告", "天美", "三角洲行动", "干员"] });
+  const res = await app.inject({ method: "GET", url: `/api/site/items/${id}` });
+  const body = JSON.parse(res.body) as { tags: string[]; tagTopics: Record<string, string>; topics: Array<{ slug: string }> };
+  assert.deepEqual(body.tags, ["版本更新", "全面战场", "官方公告", "天美", "三角洲行动", "干员"]);
+  assert.deepEqual(body.tagTopics, { "版本更新": "versions", "全面战场": "warfare", "官方公告": "announcements", "天美": "timi", "三角洲行动": "delta-force" });
+  // The game its title does not name is a topic of the tag, not of the article.
+  assert.deepEqual(body.topics.map((t) => t.slug), ["timi", "warfare", "versions", "announcements"]);
 });
 
 test("a company topic's name and aliases find reports about it", async () => {
