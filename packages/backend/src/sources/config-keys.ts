@@ -18,7 +18,7 @@ const KEYS: Record<SourceRow["kind"], string[]> = {
     ...COLLECTED, "url", "mode", "method", "headers", "bodyJson", "jsonKey", "windowVar", "itemsPath", "itemsObjectValues",
     "titlePaths", "summaryPaths", "summaryIsBody", "authorPaths", "publishedAtPath", "publishedAtUnit", "publishedAtUtcOffset", "externalIdPath",
     "bodyUrlTemplate", "bodyPath",
-    "urlTemplate", "urlTemplateFallback", "rawDropKeys", "requireBoolean", "minNumeric",
+    "urlTemplate", "urlTemplateFallback", "publishedAtForFallbackUrl", "rawDropKeys", "requireBoolean", "minNumeric",
     "imagePaths", "requirePublishedAt", "minRequestGapMs",
     "videoVidPath", "videoInfoUrlTemplate", "videoTagPath", "videoDurationPath",
   ],
@@ -74,6 +74,8 @@ export function unsupportedConfig(kind: SourceRow["kind"], config: Record<string
     else if (key === "publisherRequiresDiscovery" && (typeof value !== "boolean"
       || value && (!Array.isArray(config.publisherUrlPrefixes) || config.publisherUrlPrefixes.length === 0))) out.push(key);
     else if (key === "publishedAfter" && !utcInstant(value)) out.push(key);
+    else if (key === "publishedAtForFallbackUrl" && (typeof value !== "boolean"
+      || value && (!config.urlTemplate || !config.urlTemplateFallback || !config.publishedAtPath))) out.push(key);
     else if (key === "acceptLanguage" && (typeof value !== "string" || !ACCEPT_LANGUAGE.test(value))) out.push(key);
     else if (key === "requirePublishedAt" && typeof value !== "boolean") out.push(key);
     else if (key === "minRequestGapMs" && (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > 10_000)) out.push(key);
